@@ -84,6 +84,7 @@ namespace ArrCompanion
         public string Title { get; set; } = "";
         public bool Success { get; set; }
         public bool AlreadyIn { get; set; }
+        public bool NotSent { get; set; }   // its Sonarr / Radarr is not set up
         public string Message { get; set; } = "";
     }
 
@@ -103,6 +104,25 @@ namespace ArrCompanion
         public string RuleId { get; set; } = "";
         // A rule being edited: its preview before it is saved.
         public ArrRule? Rule { get; set; }
+    }
+
+    [Route("/ArrCompanion/Posters", "POST")]
+    [Authenticated(Roles = "Admin")]
+    public class PostersRequest : IReturn<PostersResponse>
+    {
+        public List<string> Keys { get; set; } = new List<string>();
+    }
+
+    public class PostersResponse
+    {
+        public bool HasKey { get; set; }    // a TMDb key to ask with (Arr Companion's or Home Screen Companion's)
+        public List<PosterItem> Posters { get; set; } = new List<PosterItem>();
+    }
+
+    public class PosterItem
+    {
+        public string Key { get; set; } = "";
+        public string Url { get; set; } = "";   // "" = no poster
     }
 
     [Route("/ArrCompanion/History", "GET")]
@@ -187,7 +207,8 @@ namespace ArrCompanion
                 response.Results.Add(item);
                 if (instance == null)
                 {
-                    item.Message = $"No {ArrKind.Label(kind)} is set up.";
+                    item.NotSent = true;
+                    item.Message = $"Not sent: {ArrKind.Label(kind)} is not set up. Add its URL and API key under Settings.";
                     continue;
                 }
                 var options = ArrClient.AddOptions.From(instance);
@@ -242,11 +263,25 @@ namespace ArrCompanion
                 var rule = request.Rule;
                 var catalog = await Catalog.BuildAsync(config, _json, CancellationToken.None).ConfigureAwait(false);
                 if (!catalog.File.Found) return new Rules.Outcome { Message = catalog.File.Problem ?? "No missing titles file." };
-                var outcome = Rules.Picks(config, catalog, new[] { rule });
+                var outcome = Rules.Picks(config, catalog, new[] { rule }, preview: true);
                 outcome.Message = outcome.Picks.Count == 0 ? "Nothing to add." : $"Would add {outcome.Picks.Count}.";
                 return outcome;
             }
             return await Rules.RunAsync(config, _json, request.DryRun, string.IsNullOrEmpty(request.RuleId) ? null : request.RuleId, CancellationToken.None).ConfigureAwait(false);
+        }
+
+        public async Task<object> Post(PostersRequest request)
+        {
+            var config = Config;
+            var apiKey = Posters.ApiKey(config);
+            var keys = new HashSet<string>((request.Keys ?? new List<string>()).Take(100), StringComparer.OrdinalIgnoreCase);
+            var titles = MissingList.Read(config, _json).Titles.Where(t => keys.Contains(t.Key)).ToList();
+            var paths = await Posters.PathsAsync(titles, apiKey, _json, CancellationToken.None).ConfigureAwait(false);
+            return new PostersResponse
+            {
+                HasKey = apiKey.Length > 0,
+                Posters = paths.Select(p => new PosterItem { Key = p.Key, Url = Posters.Url(p.Value) }).ToList()
+            };
         }
 
         public object Get(HistoryRequest request) =>

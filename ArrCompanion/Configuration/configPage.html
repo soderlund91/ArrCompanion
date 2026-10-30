@@ -71,6 +71,9 @@
         .ac-btn.primary:hover:not(:disabled) { background: var(--ac-primary-hover); }
         .ac-btn.small { height: 26px; padding: 0 8px; font-size: 0.82em; }
         .ac-btn.ghost { background: transparent; border-color: transparent; }
+        /* An add whose server is not set up yet: it opens, but says so when it is sent. */
+        .ac-btn.warn { border-color: rgba(230,193,90,0.55); color: var(--ac-warning-text); background: rgba(230,193,90,0.08); }
+        .ac-btn.warn:hover:not(:disabled) { background: rgba(230,193,90,0.16); }
         .ac-btn.ghost:hover:not(:disabled) { background: var(--ac-tint-2); }
 
         .ac-input, .ac-select {
@@ -80,7 +83,10 @@
         .ac-select option { background: var(--ac-popup-bg); color: var(--ac-popup-ink); }
         .ac-field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; }
         .ac-field > span { font-size: 0.8em; color: var(--theme-text-secondary); font-weight: 500; }
-        .ac-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.9em; margin: 4px 14px 8px 0; }
+        /* Emby's checkbox (emby-checkbox), side by side */
+        /* Emby's .emby-checkbox-label is width:100%: in a row of controls it would push the rest out. */
+        .ac-cb, .ac-cb.emby-checkbox-label { display: inline-flex !important; width: auto !important; flex: 0 0 auto; margin: 2px 18px 6px 0 !important; font-size: 0.92em; }
+        .ac-cb > label, .ac-cb.emby-checkbox-label { margin: 0; }
 
         .ac-banner { border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 0.9em; line-height: 1.45; border: 1px solid var(--ac-hairline); background: var(--ac-tint-1); }
         .ac-banner.warn { border-color: rgba(230,193,90,0.45); color: var(--ac-warning-text); background: rgba(230,193,90,0.08); }
@@ -92,14 +98,57 @@
         .ac-bulk .ac-count { font-size: 0.88em; margin-right: auto; color: var(--theme-text-secondary); }
 
         .ac-list { border: 1px solid var(--ac-hairline); border-radius: 8px; overflow: hidden; }
-        .ac-item { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 12px; border-top: 1px solid var(--ac-hairline); }
+        .ac-item { display: grid; grid-template-columns: 24px 54px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--ac-hairline); }
         .ac-item:first-child { border-top: none; }
+        .ac-item.selectable { cursor: pointer; }
         .ac-item:hover { background: var(--ac-tint-1); }
+        /* A picked row: only a faint green and a thin edge, never more */
+        .ac-item.selected { background: rgba(82,181,75,0.05); box-shadow: inset 2px 0 0 rgba(82,181,75,0.6); }
+        .ac-item.selected:hover { background: rgba(82,181,75,0.08); }
+        .ac-item .ac-cb { margin: 0 !important; }
         .ac-item.dim { opacity: 0.6; }
         .ac-item-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
         .ac-item-title .ac-year { color: var(--theme-text-secondary); font-weight: 400; margin-left: 4px; }
         .ac-item-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; align-items: center; }
         .ac-item-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+        .ac-poster {
+            width: 54px; aspect-ratio: 2 / 3; border-radius: 4px; background: var(--ac-tint-3) center / cover no-repeat;
+            display: flex; align-items: center; justify-content: center; overflow: hidden; color: var(--theme-text-secondary);
+        }
+        .ac-poster .md-icon { opacity: 0.4; }
+        .ac-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+        /* Where a title is on its lists: one line per list */
+        .ac-places { display: flex; flex-direction: column; gap: 2px; margin-top: 5px; font-size: 0.84em; }
+        .ac-place { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+        .ac-place .ac-rank { min-width: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
+        .ac-place.top .ac-rank { color: var(--ac-primary-text); }
+        .ac-place .ac-list-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ac-place .ac-of { color: var(--theme-text-secondary); font-size: 0.9em; white-space: nowrap; }
+        .ac-place.unknown .ac-rank { color: var(--theme-text-secondary); font-weight: 500; }
+        .ac-place.focus .ac-list-name { font-weight: 600; }
+
+        /* Poster view */
+        .ac-grid-view { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+        .ac-card { position: relative; display: flex; flex-direction: column; border-radius: 8px; border: 1px solid var(--ac-hairline); background: var(--theme-background-level2); overflow: hidden; }
+        .ac-card.dim { opacity: 0.6; }
+        .ac-card.selectable { cursor: pointer; }
+        .ac-card.selected { border-color: rgba(82,181,75,0.55); background: rgba(82,181,75,0.05); }
+        .ac-card-sel .ac-cb { margin: 0 !important; }
+        .ac-card .ac-poster { width: 100%; border-radius: 0; }
+        .ac-card .ac-poster .md-icon { font-size: 2.4em; }
+        .ac-card-sel { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,0.55); border-radius: 4px; padding: 2px 3px; line-height: 0; }
+        .ac-card-rank { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.7); color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 0.8em; font-weight: 700; }
+        .ac-card-rank.top { background: var(--ac-primary); }
+        .ac-card-body { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
+        .ac-card-body .ac-item-title { white-space: nowrap; font-size: 0.92em; }
+        .ac-card-body .ac-places { font-size: 0.78em; margin-top: 0; }
+        .ac-card-body .ac-place { gap: 4px; }
+        .ac-card-body .ac-place .ac-rank { min-width: 22px; }
+        .ac-card-actions { display: flex; gap: 4px; margin-top: auto; padding-top: 6px; }
+        .ac-card-actions .ac-btn { flex: 1; justify-content: center; }
+        .ac-card-actions .ac-btn.ghost { flex: 0 0 auto; }
+
         .ac-empty { padding: 28px; text-align: center; color: var(--theme-text-secondary); }
 
         .ac-chip {
@@ -121,7 +170,9 @@
         .ac-rule { border: 1px solid var(--ac-hairline); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; background: var(--theme-background-level2); }
         .ac-rule.off { opacity: 0.65; }
         .ac-rule-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-        .ac-rule-head .ac-input { flex: 1 1 auto; font-weight: 600; }
+        .ac-rule-head .ac-input { flex: 1 1 0; min-width: 0; font-weight: 600; }
+        .ac-rule-head .ac-cb { margin: 0 !important; }
+        .ac-rule-head .ac-btn { flex: 0 0 auto; }
         .ac-rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0 12px; }
         .ac-rule-summary { font-size: 0.85em; color: var(--theme-text-secondary); margin: 2px 0 8px; }
         .ac-preview { margin-top: 8px; font-size: 0.88em; }
@@ -152,8 +203,9 @@
         @keyframes ac-spin { to { transform: rotate(360deg); } }
 
         @media (max-width: 640px) {
-            .ac-item { grid-template-columns: 24px minmax(0, 1fr); }
-            .ac-item-actions { grid-column: 2; justify-content: flex-start; }
+            .ac-item { grid-template-columns: 24px 44px minmax(0, 1fr); }
+            .ac-item .ac-poster { width: 44px; }
+            .ac-item-actions { grid-column: 3; justify-content: flex-start; }
         }
     </style>
 
@@ -161,7 +213,7 @@
         <div class="verticalSection">
             <div class="ac-header">
                 <h2>Arr Companion</h2>
-                <span class="ac-version">Arr Companion v0.1.0.0</span>
+                <span class="ac-version">Arr Companion v0.2.0.0</span>
             </div>
             <p class="ac-muted" style="margin-top:0;">The titles Home Screen Companion finds missing from the library, and where they are on its lists. Add them to Sonarr and Radarr by hand, or let rules add them.</p>
 
@@ -194,7 +246,7 @@
                     <select class="ac-select" id="acFilterStatus">
                         <option value="missing">Not in Sonarr / Radarr</option>
                         <option value="inArr">Already in Sonarr / Radarr</option>
-                        <option value="ignored">Ignored</option>
+                        <option value="ignored">Hidden</option>
                         <option value="">Everything</option>
                     </select>
                     <select class="ac-select" id="acSort">
@@ -203,22 +255,27 @@
                         <option value="title">Title</option>
                         <option value="year">Newest first</option>
                     </select>
+                    <select class="ac-select" id="acView" title="View">
+                        <option value="list">List</option>
+                        <option value="posters">Posters</option>
+                    </select>
                     <button type="button" class="ac-btn ghost" id="acRefresh" title="Read the list again"><i class="md-icon">refresh</i></button>
                 </div>
                 <div class="ac-bulk">
-                    <label class="ac-check" style="margin:0;"><input type="checkbox" id="acSelectAll" /> Select all shown</label>
+                    <label class="checkboxContainer ac-cb" style="margin:0 !important;"><input type="checkbox" is="emby-checkbox" id="acSelectAll" /><span>Select all shown</span></label>
                     <span class="ac-count" id="acCount"></span>
-                    <button type="button" class="ac-btn small" id="acIgnoreSelected" disabled><i class="md-icon">visibility_off</i>Ignore</button>
+                    <button type="button" class="ac-btn small ghost" id="acShowHidden" style="display:none;"></button>
+                    <button type="button" class="ac-btn small" id="acIgnoreSelected" disabled><i class="md-icon">visibility_off</i>Hide</button>
                     <button type="button" class="ac-btn small primary" id="acAddSelected" disabled><i class="md-icon">add</i>Add selected</button>
                 </div>
-                <div class="ac-list" id="acMissingList"><div class="ac-empty"><span class="ac-spin"></span></div></div>
+                <div id="acMissingList"><div class="ac-empty"><span class="ac-spin"></span></div></div>
             </div>
 
             <!-- Rules -->
             <div class="ac-tab-content" data-tab-content="rules" style="display:none;">
                 <div class="ac-banner">A rule adds the titles that are missing and high on a list, for example the top 3 of a trending list. A title a rule has added once is not added again, even if it is removed from Sonarr or Radarr later. Rules use the root folder and quality profile set under Settings.</div>
                 <div class="ac-panel">
-                    <label class="ac-check"><input type="checkbox" id="acRunOnChange" /> Run the rules a few minutes after the list changes</label>
+                    <label class="checkboxContainer ac-cb"><input type="checkbox" is="emby-checkbox" id="acRunOnChange" /><span>Run the rules a few minutes after the list changes</span></label>
                     <div class="ac-hint">They also run on the scheduled task <b>Arr Companion › Run rules</b> (every 6 hours unless changed under Scheduled Tasks).</div>
                 </div>
                 <div id="acRules"></div>
@@ -251,6 +308,15 @@
                         <input type="text" class="ac-input" id="acListPath" placeholder="Home Screen Companion's file" />
                     </div>
                     <div class="ac-hint" id="acListPathHint">Leave empty to read the file Home Screen Companion keeps. It needs Missing titles on, with "Keep the list in a file" and JSON.</div>
+                </div>
+
+                <div class="ac-panel">
+                    <div class="ac-panel-title"><i class="md-icon">image</i>Posters</div>
+                    <div class="ac-field">
+                        <span>TMDb API key or read access token</span>
+                        <input type="text" class="ac-input" id="acTmdbKey" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="Home Screen Companion's key" />
+                    </div>
+                    <div class="ac-hint">Leave empty to use the TMDb key set in Home Screen Companion. The posters are looked up once and kept; the browser loads them from TMDb.</div>
                 </div>
 
                 <div class="ac-row">

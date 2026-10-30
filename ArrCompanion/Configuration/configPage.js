@@ -19,8 +19,14 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         config: null,      // the saved settings
         catalog: null,     // GET ArrCompanion/Missing
         selected: {},      // key -> true
-        options: {}        // instance id (or url|key) -> { RootFolders, QualityProfiles }
+        options: {},       // instance id (or url|key) -> { RootFolders, QualityProfiles }
+        posters: {},       // key -> poster url ('' = none)
+        posterAsked: {},   // key -> true while asked
+        noTmdbKey: false   // no TMDb key: posters are not asked for
     };
+
+    function storedView() { try { return localStorage.getItem('arrCompanionView') || 'list'; } catch (e) { return 'list'; } }
+    function storeView(v) { try { localStorage.setItem('arrCompanionView', v); } catch (e) { } }
 
     // ---- Helpers ----
 
@@ -171,6 +177,17 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
                     + ' under Settings to add ' + unsetKinds.map(function (k) { return k.type === 'show' ? 'shows' : 'movies'; }).join(' and ') + '.</div>';
             }
         }
+        if (file.Found) {
+            var unranked = {};
+            (c.Rows || []).forEach(function (r) {
+                if (r.Status !== 'missing') return;
+                (r.Places || []).forEach(function (p) { if (p.Rank == null) unranked[p.List] = true; });
+            });
+            var names = Object.keys(unranked);
+            if (names.length)
+                html += '<div class="ac-banner warn">The place on the list is not known yet for ' + names.map(function (n) { return '<b>' + esc(n) + '</b>'; }).join(', ')
+                    + '. It is read from Home Screen Companion\'s lists: run its sync once more.</div>';
+        }
         (c.Errors || []).forEach(function (e) { html += '<div class="ac-banner error">' + esc(e) + '</div>'; });
         view.querySelector('#acMissingBanner').innerHTML = html;
     }
@@ -211,22 +228,70 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         return out;
     }
 
-    function placeChips(row, list) {
-        var places = (row.Places || []).slice().sort(function (a, b) {
+    function sortedPlaces(row, list) {
+        return (row.Places || []).slice().sort(function (a, b) {
             if (list) { if (a.List === list && b.List !== list) return -1; if (b.List === list && a.List !== list) return 1; }
-            return (a.Rank == null ? 1e9 : a.Rank) - (b.Rank == null ? 1e9 : b.Rank);
+            return (a.Rank == null ? 1e9 : a.Rank) - (b.Rank == null ? 1e9 : b.Rank) || a.List.localeCompare(b.List);
         });
-        return places.map(function (p) {
-            if (p.Rank == null) return '<span class="ac-chip">' + esc(p.List) + '</span>';
-            return '<span class="ac-chip' + (p.Rank <= 3 ? ' top' : '') + '" title="Place ' + p.Rank + (p.Of ? ' of ' + p.Of : '') + ' on ' + esc(p.List) + '">'
-                + '<span class="ac-rank">#' + p.Rank + '</span>' + esc(p.List) + (p.Of ? '<span style="opacity:.6">/' + p.Of + '</span>' : '') + '</span>';
+    }
+
+    // One line per list: "#1  Trending  of 20". At most `max` lines, then "+ n more lists".
+    function placeLines(row, list, max) {
+        var places = sortedPlaces(row, list);
+        var shown = max && places.length > max ? places.slice(0, max) : places;
+        var html = shown.map(function (p) {
+            var cls = 'ac-place' + (p.Rank == null ? ' unknown' : p.Rank <= 3 ? ' top' : '') + (list && p.List === list ? ' focus' : '');
+            var title = p.Rank == null ? esc(p.List) + ': place not known' : 'Place ' + p.Rank + (p.Of ? ' of ' + p.Of : '') + ' on ' + esc(p.List);
+            return '<div class="' + cls + '" title="' + title + '">'
+                + '<span class="ac-rank">' + (p.Rank == null ? '–' : '#' + p.Rank) + '</span>'
+                + '<span class="ac-list-name">' + esc(p.List) + '</span>'
+                + (p.Rank != null && p.Of ? '<span class="ac-of">of ' + p.Of + '</span>' : '')
+                + '</div>';
         }).join('');
+        if (shown.length < places.length) html += '<div class="ac-place unknown"><span class="ac-rank"></span><span class="ac-of">+ ' + (places.length - shown.length) + ' more lists</span></div>';
+        return '<div class="ac-places">' + html + '</div>';
+    }
+
+    function posterHtml(row) {
+        var url = state.posters[row.Key];
+        return '<div class="ac-poster" data-poster-key="' + esc(row.Key) + '">'
+            + (url ? '<img loading="lazy" alt="" src="' + esc(url) + '" />' : '<i class="md-icon">' + (row.Type === 'show' ? 'tv' : 'movie') + '</i>')
+            + '</div>';
+    }
+
+    // Posters of the rows shown that are not known yet, 100 at a time.
+    function loadPosters(view, rows) {
+        if (state.noTmdbKey) return;
+        var keys = rows.map(function (r) { return r.Key; })
+            .filter(function (k) { return !(k in state.posters) && !state.posterAsked[k]; });
+        if (!keys.length) return;
+        var batch = keys.slice(0, 100);
+        batch.forEach(function (k) { state.posterAsked[k] = true; });
+        api('ArrCompanion/Posters', 'POST', { Keys: batch }).then(function (res) {
+            if (res && !res.HasKey) state.noTmdbKey = true;
+            ((res && res.Posters) || []).forEach(function (p) {
+                state.posters[p.Key] = p.Url || '';
+                if (!p.Url) return;
+                view.querySelectorAll('[data-poster-key]').forEach(function (el) {
+                    if (el.getAttribute('data-poster-key') === p.Key) el.innerHTML = '<img loading="lazy" alt="" src="' + esc(p.Url) + '" />';
+                });
+            });
+            batch.forEach(function (k) { delete state.posterAsked[k]; if (!(k in state.posters)) state.posters[k] = ''; });
+            if (keys.length > batch.length) loadPosters(view, rows);
+        }).catch(function () {
+            batch.forEach(function (k) { delete state.posterAsked[k]; state.posters[k] = ''; });
+        });
+    }
+
+    // Emby's own checkbox (emby-checkbox inside a label), as Home Screen Companion uses it.
+    function checkbox(attrs, checked, text) {
+        return '<label class="checkboxContainer ac-cb"><input type="checkbox" is="emby-checkbox" ' + attrs + (checked ? ' checked' : '') + ' /><span>' + (text || '') + '</span></label>';
     }
 
     function statusPill(row) {
         var k = kindOf(row.Type);
         if (row.Status === 'inArr') return '<span class="ac-pill ok">In ' + esc(instanceLabel(instanceOf(k.kind), k)) + '</span>';
-        if (row.Status === 'ignored') return '<span class="ac-pill neutral">Ignored</span>';
+        if (row.Status === 'ignored') return '<span class="ac-pill neutral">Hidden</span>';
         if (row.Status === 'noServer') return '<span class="ac-pill warn">No ' + k.label + ' set up</span>';
         if (row.AddedBefore) return '<span class="ac-pill neutral" title="Added once by Arr Companion and since removed. Rules leave it alone.">Added before</span>';
         return '';
@@ -241,38 +306,65 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             var none = state.catalog && state.catalog.File && state.catalog.File.Found ? 'Nothing matches.' : 'No titles yet.';
             listEl.innerHTML = '<div class="ac-empty">' + none + '</div>';
         } else {
-            listEl.innerHTML = rows.map(function (r) {
+            var grid = view.querySelector('#acView').value === 'posters';
+            listEl.innerHTML = '<div class="' + (grid ? 'ac-grid-view' : 'ac-list') + '">' + rows.map(function (r) {
                 var k = kindOf(r.Type);
-                var selectable = r.Status === 'missing' || r.Status === 'ignored';
-                var actions = '';
-                if (r.Status === 'missing')
-                    actions = '<button type="button" class="ac-btn small" data-action="add" data-key="' + esc(r.Key) + '"><i class="md-icon">add</i>' + esc(instanceLabel(instanceOf(k.kind), k)) + '</button>'
-                        + '<button type="button" class="ac-btn small ghost" data-action="ignore" data-key="' + esc(r.Key) + '" title="Ignore: not shown as missing, and no rule adds it"><i class="md-icon">visibility_off</i></button>';
-                else if (r.Status === 'ignored')
-                    actions = '<button type="button" class="ac-btn small ghost" data-action="unignore" data-key="' + esc(r.Key) + '"><i class="md-icon">visibility</i>Unignore</button>';
-                return '<div class="ac-item' + (r.Status === 'inArr' || r.Status === 'ignored' ? ' dim' : '') + '">'
-                    + '<div>' + (selectable ? '<input type="checkbox" class="acSel" data-key="' + esc(r.Key) + '"' + (state.selected[r.Key] ? ' checked' : '') + ' />' : '') + '</div>'
-                    + '<div style="min-width:0;">'
-                    + '<div class="ac-item-title">' + esc(r.Title) + (r.Year ? '<span class="ac-year">(' + r.Year + ')</span>' : '') + '</div>'
-                    + '<div class="ac-item-meta"><span class="ac-type">' + (r.Type === 'show' ? 'Show' : 'Movie') + '</span>' + placeChips(r, list) + statusPill(r) + '</div>'
+                var selectable = isOpen(r) || r.Status === 'ignored';
+                var server = esc(instanceLabel(instanceOf(k.kind), k));
+                var picked = selectable && state.selected[r.Key];
+                var check = selectable ? checkbox('class="acSel" data-key="' + esc(r.Key) + '"', picked) : '';
+                var rowAttrs = ' data-key="' + esc(r.Key) + '"';
+                var rowCls = (selectable ? ' selectable' : '') + (picked ? ' selected' : '');
+                var addBtn = r.Status === 'noServer'
+                    ? '<button type="button" class="ac-btn small warn" data-action="add" data-key="' + esc(r.Key) + '" title="' + k.label + ' is not set up yet: set it up under Settings to add this"><i class="md-icon">link_off</i>' + server + '</button>'
+                    : '<button type="button" class="ac-btn small" data-action="add" data-key="' + esc(r.Key) + '"><i class="md-icon">add</i>' + server + '</button>';
+                var ignoreBtn = '<button type="button" class="ac-btn small ghost" data-action="ignore" data-key="' + esc(r.Key) + '" title="Hide: not shown as missing, and no rule adds it. Hidden titles are under Show hidden."><i class="md-icon">visibility_off</i></button>';
+                var unignoreBtn = '<button type="button" class="ac-btn small ghost" data-action="unignore" data-key="' + esc(r.Key) + '" title="Show it again"><i class="md-icon">visibility</i>' + (grid ? '' : 'Unhide') + '</button>';
+                var actions = isOpen(r) ? addBtn + ignoreBtn : r.Status === 'ignored' ? unignoreBtn : '';
+                var dim = r.Status === 'inArr' || r.Status === 'ignored' ? ' dim' : '';
+                var typeAndStatus = '<span class="ac-type">' + (r.Type === 'show' ? 'Show' : 'Movie') + '</span>' + statusPill(r);
+                var titleHtml = '<div class="ac-item-title" title="' + esc(r.Title) + '">' + esc(r.Title) + (r.Year ? '<span class="ac-year">(' + r.Year + ')</span>' : '') + '</div>';
+                if (grid) {
+                    var best = bestPlace(r, list);
+                    return '<div class="ac-card' + dim + rowCls + '"' + rowAttrs + '>'
+                        + posterHtml(r)
+                        + (check ? '<div class="ac-card-sel">' + check + '</div>' : '')
+                        + (best && best.Rank != null ? '<div class="ac-card-rank' + (best.Rank <= 3 ? ' top' : '') + '">#' + best.Rank + '</div>' : '')
+                        + '<div class="ac-card-body">' + titleHtml
+                        + '<div class="ac-item-meta" style="margin-top:0;">' + typeAndStatus + '</div>'
+                        + placeLines(r, list, 3)
+                        + (actions ? '<div class="ac-card-actions">' + actions + '</div>' : '')
+                        + '</div></div>';
+                }
+                return '<div class="ac-item' + dim + rowCls + '"' + rowAttrs + '>'
+                    + '<div>' + check + '</div>'
+                    + posterHtml(r)
+                    + '<div style="min-width:0;">' + titleHtml
+                    + '<div class="ac-item-meta">' + typeAndStatus + '</div>'
+                    + placeLines(r, list, 0)
                     + '</div>'
                     + '<div class="ac-item-actions">' + actions + '</div>'
                     + '</div>';
-            }).join('');
+            }).join('') + '</div>';
+            loadPosters(view, rows);
         }
         updateBulk(view, rows);
     }
+
+    // Not in Sonarr / Radarr yet: can be picked, ignored and added (an add without its server says so).
+    function isOpen(r) { return r.Status === 'missing' || r.Status === 'noServer'; }
 
     function selectedKeys() { return Object.keys(state.selected).filter(function (k) { return state.selected[k]; }); }
 
     function updateBulk(view, rows) {
         rows = rows || visibleRows(view);
-        var selectable = rows.filter(function (r) { return r.Status === 'missing' || r.Status === 'ignored'; });
+        var selectable = rows.filter(function (r) { return isOpen(r) || r.Status === 'ignored'; });
         var keys = selectedKeys();
         var rowByKey = {};
         ((state.catalog && state.catalog.Rows) || []).forEach(function (r) { rowByKey[r.Key] = r; });
-        var addable = keys.filter(function (k) { return rowByKey[k] && rowByKey[k].Status === 'missing'; });
-        var ignorable = keys.filter(function (k) { return rowByKey[k] && rowByKey[k].Status === 'missing'; });
+        var addable = keys.filter(function (k) { return rowByKey[k] && isOpen(rowByKey[k]); });
+        var viewingHidden = view.querySelector('#acFilterStatus').value === 'ignored';
+        var hideable = viewingHidden ? keys.filter(function (k) { return rowByKey[k] && rowByKey[k].Status === 'ignored'; }) : addable;
         view.querySelector('#acCount').textContent = rows.length + ' shown' + (keys.length ? ' · ' + keys.length + ' selected' : '');
         var all = view.querySelector('#acSelectAll');
         all.checked = selectable.length > 0 && selectable.every(function (r) { return state.selected[r.Key]; });
@@ -280,14 +372,20 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         var add = view.querySelector('#acAddSelected');
         add.disabled = addable.length === 0;
         add.innerHTML = '<i class="md-icon">add</i>Add ' + (addable.length ? addable.length + ' ' : '') + 'selected';
-        view.querySelector('#acIgnoreSelected').disabled = ignorable.length === 0;
+        var hideBtn = view.querySelector('#acIgnoreSelected');
+        hideBtn.disabled = hideable.length === 0;
+        hideBtn.innerHTML = viewingHidden ? '<i class="md-icon">visibility</i>Unhide' : '<i class="md-icon">visibility_off</i>Hide';
+        var hidden = ((state.catalog && state.catalog.Rows) || []).filter(function (r) { return r.Status === 'ignored'; }).length;
+        var showHidden = view.querySelector('#acShowHidden');
+        showHidden.style.display = viewingHidden || hidden ? '' : 'none';
+        showHidden.innerHTML = viewingHidden ? '<i class="md-icon">arrow_back</i>Back to missing' : '<i class="md-icon">visibility</i>Show hidden (' + hidden + ')';
     }
 
     function ignore(view, keys, on) {
         if (!keys.length) return Promise.resolve();
         return api('ArrCompanion/Ignore', 'POST', { Keys: keys, Ignore: on }).then(function () {
             keys.forEach(function (k) { delete state.selected[k]; });
-            toast((on ? 'Ignored ' : 'No longer ignored: ') + keys.length + (keys.length === 1 ? ' title' : ' titles'));
+            toast((on ? 'Hidden: ' : 'Shown again: ') + keys.length + (keys.length === 1 ? ' title' : ' titles'));
             return loadMissing(view);
         }).catch(function (err) { toast('Failed: ' + err.message); });
     }
@@ -330,14 +428,14 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             + '<label class="ac-field"><span>Quality profile</span><select class="ac-select" data-f="QualityProfileId"><option>Loading…</option></select></label>'
             + extra
             + '</div>'
-            + '<label class="ac-check"><input type="checkbox" data-f="Monitored"' + (instance.Monitored !== false ? ' checked' : '') + ' /> Monitored</label>'
-            + '<label class="ac-check"><input type="checkbox" data-f="Search"' + (instance.SearchOnAdd !== false ? ' checked' : '') + ' /> Search when added</label>';
+            + checkbox('data-f="Monitored"', instance.Monitored !== false, 'Monitored')
+            + checkbox('data-f="Search"', instance.SearchOnAdd !== false, 'Search when added');
     }
 
     function openAddDialog(view, keys) {
         var rowByKey = {};
         ((state.catalog && state.catalog.Rows) || []).forEach(function (r) { rowByKey[r.Key] = r; });
-        var rows = keys.map(function (k) { return rowByKey[k]; }).filter(function (r) { return r && r.Status === 'missing'; });
+        var rows = keys.map(function (k) { return rowByKey[k]; }).filter(function (r) { return r && isOpen(r); });
         if (!rows.length) return;
         var kinds = KINDS.filter(function (k) { return rows.some(function (r) { return r.Type === k.type; }); });
 
@@ -346,16 +444,19 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         backdrop.setAttribute('data-ac-theme', theme);
         var title = rows.length === 1 ? esc(rows[0].Title) + (rows[0].Year ? ' (' + rows[0].Year + ')' : '') : 'Add ' + rows.length + ' titles';
         var sub = rows.length === 1
-            ? placeChips(rows[0], '')
+            ? placeLines(rows[0], '', 0)
             : kinds.map(function (k) { var n = rows.filter(function (r) { return r.Type === k.type; }).length; return n + (k.type === 'show' ? (n === 1 ? ' show' : ' shows') : (n === 1 ? ' movie' : ' movies')); }).join(', ');
         backdrop.innerHTML = '<div class="ac-modal" role="dialog" aria-modal="true">'
             + '<h3>' + title + '</h3>'
-            + '<div class="ac-item-meta" style="margin-bottom:12px;">' + sub + '</div>'
+            + '<div style="margin-bottom:12px;">' + sub + '</div>'
             + kinds.map(function (k) {
                 var instance = instanceOf(k.kind);
                 return '<div class="ac-kind" data-kind="' + k.kind + '">'
                     + '<div class="ac-eyebrow">' + esc(instanceLabel(instance, k)) + '</div>'
-                    + (isSetUp(instance) ? choiceFields(k, instance) : '<div class="ac-banner warn">' + k.label + ' is not set up under Settings.</div>')
+                    + (isSetUp(instance) ? choiceFields(k, instance)
+                        : '<div class="ac-banner warn"><b>' + k.label + ' is not set up yet.</b> These ' + (k.type === 'show' ? 'shows' : 'movies')
+                            + ' cannot be sent until it is: add its URL and API key under Settings.'
+                            + '<div style="margin-top:8px;"><button type="button" class="ac-btn small ac-to-settings"><i class="md-icon">settings</i>Open Settings</button></div></div>')
                     + '</div>';
             }).join('')
             + '<div class="ac-add-results"></div>'
@@ -373,6 +474,9 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         document.addEventListener('keydown', onKey);
         backdrop.addEventListener('click', function (e) { if (e.target === backdrop) close(); });
         backdrop.querySelector('.ac-cancel').addEventListener('click', close);
+        backdrop.querySelectorAll('.ac-to-settings').forEach(function (b) {
+            b.addEventListener('click', function () { close(); showTab(view, 'settings'); });
+        });
 
         kinds.forEach(function (k) {
             var instance = instanceOf(k.kind);
@@ -417,8 +521,8 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
                 changed = true;
                 var results = (res && res.Results) || [];
                 backdrop.querySelector('.ac-add-results').innerHTML = '<div class="ac-eyebrow">Result</div>' + results.map(function (x) {
-                    var cls = x.Success ? 'ok' : x.AlreadyIn ? 'info' : 'err';
-                    var label = x.Success ? 'Added' : x.AlreadyIn ? 'Already there' : 'Failed';
+                    var cls = x.Success ? 'ok' : x.AlreadyIn ? 'info' : x.NotSent ? 'warn' : 'err';
+                    var label = x.Success ? 'Added' : x.AlreadyIn ? 'Already there' : x.NotSent ? 'Not sent' : 'Failed';
                     return '<div style="margin:4px 0;"><span class="ac-pill ' + cls + '">' + label + '</span> ' + esc(x.Title || x.Key)
                         + (x.Success ? '' : ' <span class="ac-muted">' + esc(x.Message) + '</span>') + '</div>';
                 }).join('');
@@ -447,7 +551,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         if (r.List && lists.indexOf(r.List) < 0) lists.push(r.List);
         return '<div class="ac-rule' + (r.Enabled ? '' : ' off') + '" data-rule="' + esc(r.Id) + '">'
             + '<div class="ac-rule-head">'
-            + '<input type="checkbox" data-r="Enabled" title="On"' + (r.Enabled ? ' checked' : '') + ' />'
+            + checkbox('data-r="Enabled" title="On"', r.Enabled, '')
             + '<input type="text" class="ac-input" data-r="Name" placeholder="' + esc(describeRule(r)) + '" value="' + esc(r.Name || '') + '" />'
             + '<button type="button" class="ac-btn small" data-rule-action="preview"><i class="md-icon">visibility</i>Preview</button>'
             + '<button type="button" class="ac-btn small ghost" data-rule-action="delete" title="Delete rule"><i class="md-icon">delete</i></button>'
@@ -586,9 +690,9 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             + '<label class="ac-field"><span>Quality profile</span><select class="ac-select" data-s="QualityProfileId">' + profileOptions(null, i.QualityProfileId || 0) + '</select></label>'
             + extra
             + '</div>'
-            + '<label class="ac-check"><input type="checkbox" data-s="Monitored"' + (i.Monitored !== false ? ' checked' : '') + ' /> Monitored</label>'
-            + '<label class="ac-check"><input type="checkbox" data-s="SearchOnAdd"' + (i.SearchOnAdd !== false ? ' checked' : '') + ' /> Search when added</label>'
-            + (k.kind === 'sonarr' ? '<label class="ac-check"><input type="checkbox" data-s="SeasonFolder"' + (i.SeasonFolder !== false ? ' checked' : '') + ' /> Season folders</label>' : '')
+            + checkbox('data-s="Monitored"', i.Monitored !== false, 'Monitored')
+            + checkbox('data-s="SearchOnAdd"', i.SearchOnAdd !== false, 'Search when added')
+            + (k.kind === 'sonarr' ? checkbox('data-s="SeasonFolder"', i.SeasonFolder !== false, 'Season folders') : '')
             + '<div class="ac-banner error" data-options-error style="display:none;"></div>'
             + '</div>';
     }
@@ -597,6 +701,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         if (!state.config) return;
         view.querySelector('#acServers').innerHTML = KINDS.map(serverPanel).join('');
         view.querySelector('#acListPath').value = state.config.MissingListPath || '';
+        view.querySelector('#acTmdbKey').value = state.config.TmdbApiKey || '';
         var file = state.catalog && state.catalog.File;
         view.querySelector('#acListPathHint').innerHTML = 'Leave empty to read the file Home Screen Companion keeps. It needs Missing titles on, with "Keep the list in a file" and JSON.'
             + (file && file.Path ? '<br />Now reading: <code>' + esc(file.Path) + '</code>' + (file.Found ? '' : ' (not there yet)') : '');
@@ -663,6 +768,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             return i;
         });
         var listPath = view.querySelector('#acListPath').value.trim();
+        var tmdbKey = view.querySelector('#acTmdbKey').value.trim();
         var btn = view.querySelector('#acSaveSettings');
         btn.disabled = true;
         saveConfig(function (server) {
@@ -672,8 +778,11 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             var kept = (server.Instances || []).filter(function (i) { return !shown[i.Id]; });
             server.Instances = panels.filter(function (p) { return p.Url || p.ApiKey || instances().some(function (i) { return i.Id === p.Id; }); }).concat(kept);
             server.MissingListPath = listPath;
+            server.TmdbApiKey = tmdbKey;
         }).then(function () {
             toast('Settings saved');
+            state.posters = {};
+            state.noTmdbKey = false;
             return loadMissing(view);
         }).catch(function (err) { toast('Could not save: ' + err.message); })
         .then(function () { btn.disabled = false; });
@@ -688,19 +797,37 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         });
 
         // Missing
-        ['#acSearch', '#acFilterType', '#acFilterList', '#acFilterTop', '#acFilterStatus', '#acSort'].forEach(function (sel) {
-            view.querySelector(sel).addEventListener(sel === '#acSearch' ? 'input' : 'change', function () { renderMissing(view); });
+        ['#acSearch', '#acFilterType', '#acFilterList', '#acFilterTop', '#acFilterStatus', '#acSort', '#acView'].forEach(function (sel) {
+            view.querySelector(sel).addEventListener(sel === '#acSearch' ? 'input' : 'change', function () {
+                if (sel === '#acView') storeView(view.querySelector('#acView').value);
+                renderMissing(view);
+            });
         });
         view.querySelector('#acRefresh').addEventListener('click', function () { loadMissing(view); });
+        function pick(key, on) {
+            if (on) state.selected[key] = true; else delete state.selected[key];
+            view.querySelectorAll('#acMissingList [data-key].selectable').forEach(function (row) {
+                if (row.getAttribute('data-key') !== key) return;
+                row.classList.toggle('selected', on);
+                var cb = row.querySelector('.acSel');
+                if (cb && cb.checked !== on) cb.checked = on;
+            });
+            updateBulk(view);
+        }
         view.querySelector('#acMissingList').addEventListener('change', function (e) {
             if (!e.target.classList.contains('acSel')) return;
-            state.selected[e.target.getAttribute('data-key')] = e.target.checked;
-            if (!e.target.checked) delete state.selected[e.target.getAttribute('data-key')];
-            updateBulk(view);
+            pick(e.target.getAttribute('data-key'), e.target.checked);
         });
         view.querySelector('#acMissingList').addEventListener('click', function (e) {
             var b = e.target.closest('[data-action]');
-            if (!b) return;
+            if (!b) {
+                // The checkbox's own label toggles it (and fires change); a button or link does its own thing.
+                if (e.target.closest('label, button, a, input, select')) return;
+                if (window.getSelection && String(window.getSelection()).length) return;   // selecting text
+                var row = e.target.closest('.selectable[data-key]');
+                if (row) pick(row.getAttribute('data-key'), !state.selected[row.getAttribute('data-key')]);
+                return;
+            }
             var key = b.getAttribute('data-key'), action = b.getAttribute('data-action');
             if (action === 'add') openAddDialog(view, [key]);
             else if (action === 'ignore') ignore(view, [key], true);
@@ -708,7 +835,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         });
         view.querySelector('#acSelectAll').addEventListener('change', function (e) {
             visibleRows(view).forEach(function (r) {
-                if (r.Status !== 'missing' && r.Status !== 'ignored') return;
+                if (!isOpen(r) && r.Status !== 'ignored') return;
                 if (e.target.checked) state.selected[r.Key] = true; else delete state.selected[r.Key];
             });
             renderMissing(view);
@@ -717,7 +844,14 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         view.querySelector('#acIgnoreSelected').addEventListener('click', function () {
             var rowByKey = {};
             ((state.catalog && state.catalog.Rows) || []).forEach(function (r) { rowByKey[r.Key] = r; });
-            ignore(view, selectedKeys().filter(function (k) { return rowByKey[k] && rowByKey[k].Status === 'missing'; }), true);
+            var unhide = view.querySelector('#acFilterStatus').value === 'ignored';
+            ignore(view, selectedKeys().filter(function (k) { return rowByKey[k] && (unhide ? rowByKey[k].Status === 'ignored' : isOpen(rowByKey[k])); }), !unhide);
+        });
+        view.querySelector('#acShowHidden').addEventListener('click', function () {
+            var status = view.querySelector('#acFilterStatus');
+            status.value = status.value === 'ignored' ? 'missing' : 'ignored';
+            state.selected = {};
+            renderMissing(view);
         });
 
         // Rules
@@ -778,6 +912,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
     return function (view) {
         view.addEventListener('viewshow', function () {
             applyTheme(view);
+            view.querySelector('#acView').value = storedView();
             if (!view.dataset.acInit) {
                 view.dataset.acInit = '1';
                 bind(view);

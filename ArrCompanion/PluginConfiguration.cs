@@ -14,6 +14,9 @@ namespace ArrCompanion
         // The missing titles file (missing_titles.json). Empty = the one Home Screen Companion keeps.
         public string MissingListPath { get; set; } = "";
 
+        // For the posters. Empty = Home Screen Companion's TMDb key.
+        public string TmdbApiKey { get; set; } = "";
+
         public List<ArrRule> Rules { get; set; } = new List<ArrRule>();
         // Rules run a few minutes after the file changes, not only on the scheduled task.
         public bool RunRulesOnListChange { get; set; } = true;

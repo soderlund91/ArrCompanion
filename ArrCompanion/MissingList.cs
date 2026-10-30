@@ -95,6 +95,8 @@ namespace ArrCompanion
         {
             public bool Installed;
             public string Folder = "";
+            public string SourcesPath = "";   // what each list held, in its order (missing_titles/sources.json)
+            public string TmdbApiKey = "";
             public bool On;     // its Missing tab with "Keep the list in a file" and JSON on
         }
 
@@ -107,11 +109,13 @@ namespace ArrCompanion
                 if (plugin == null) return result;
                 result.Installed = true;
                 result.Folder = Path.Combine(plugin.DataFolderPath, "missing_titles", "export");
+                result.SourcesPath = Path.Combine(plugin.DataFolderPath, "missing_titles", "sources.json");
                 var config = plugin.GetType().GetProperty("Configuration")?.GetValue(plugin);
                 if (config == null) return result;
                 bool Flag(string name) => config.GetType().GetProperty(name)?.GetValue(config) as bool? ?? false;
                 var folder = config.GetType().GetProperty("MissingExportFolder")?.GetValue(config) as string;
                 if (!string.IsNullOrWhiteSpace(folder)) result.Folder = folder!.Trim();
+                result.TmdbApiKey = ((config.GetType().GetProperty("TmdbApiKey")?.GetValue(config) as string) ?? "").Trim();
                 result.On = Flag("ShowMissingTitles") && Flag("MissingExportToFile") && Flag("MissingExportJson");
             }
             catch (Exception swallowed) { Log.Debug("Could not read Home Screen Companion's settings: " + swallowed.Message); }
@@ -174,12 +178,89 @@ namespace ArrCompanion
                 t.Places = f.ranks != null && f.ranks.Count > 0
                     ? f.ranks.Where(r => !string.IsNullOrWhiteSpace(r.list)).Select(r => new Place { List = r.list!.Trim(), Rank = r.rank, Of = r.of }).ToList()
                     : (f.lists ?? new List<string>()).Where(l => !string.IsNullOrWhiteSpace(l)).Select(l => new Place { List = l.Trim() }).ToList();
-                t.BestRank = t.Places.Where(p => p.Rank != null).Select(p => p.Rank).DefaultIfEmpty(null).Min();
                 snap.Titles.Add(t);
             }
             foreach (var m in file?.movies ?? new List<FileTitle>()) Add(m, MediaType.Movie);
             foreach (var s in file?.shows ?? new List<FileTitle>()) Add(s, MediaType.Show);
+
+            if (snap.Titles.Any(t => t.Places.Any(p => p.Rank == null))) FillRanks(snap.Titles, json);
+            foreach (var t in snap.Titles)
+                t.BestRank = t.Places.Where(p => p.Rank != null).Select(p => p.Rank).DefaultIfEmpty(null).Min();
             return snap;
+        }
+
+        // ---- Places from Home Screen Companion's own record of its lists ----
+
+        // missing_titles/sources.json: every list's entries in the list's order, as the last sync read them.
+        public sealed class SourcesShape
+        {
+            public List<SourceShape>? Sources { get; set; }
+        }
+
+        public sealed class SourceShape
+        {
+            public string? Name { get; set; }
+            public List<SourceItem>? Items { get; set; }
+        }
+
+        public sealed class SourceItem
+        {
+            public string? Name { get; set; }
+            public string? Imdb { get; set; }
+            public string? Tmdb { get; set; }
+            public string? Type { get; set; }
+            public int? Year { get; set; }
+            public int? Rank { get; set; }
+        }
+
+        private static string Norm(string? s) => new string((s ?? "").ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+
+        /// <summary>
+        /// The places a file without them (an older Home Screen Companion) lacks: an entry's place
+        /// is its position on the list. A list of several URLs gives a title its best place.
+        /// </summary>
+        private static void FillRanks(List<Title> titles, IJsonSerializer json)
+        {
+            var path = Hsc().SourcesPath;
+            if (path.Length == 0 || !File.Exists(path)) return;
+            SourcesShape? file;
+            try { file = json.DeserializeFromFile<SourcesShape>(path); }
+            catch (Exception ex) { Log.Debug("Could not read " + path + ": " + ex.Message); return; }
+
+            // (list, id) -> (rank, of); ids are "imdb:", "tmdb:<type>:" and "name:<name>|<year>".
+            var places = new Dictionary<string, (int Rank, int Of)>(StringComparer.OrdinalIgnoreCase);
+            void Put(string list, string id, int rank, int of)
+            {
+                var k = list + " | " + id;
+                if (!places.TryGetValue(k, out var had) || rank < had.Rank) places[k] = (rank, of);
+            }
+            foreach (var src in file?.Sources ?? new List<SourceShape>())
+            {
+                var list = (src.Name ?? "").Trim();
+                var items = src.Items ?? new List<SourceItem>();
+                if (list.Length == 0 || items.Count == 0) continue;
+                int of = Math.Max(items.Count, items.Max(i => i.Rank) ?? 0);
+                for (int n = 0; n < items.Count; n++)
+                {
+                    var i = items[n];
+                    int rank = i.Rank ?? n + 1;
+                    var type = i.Type == "show" ? MediaType.Show : i.Type == "movie" ? MediaType.Movie : "";
+                    if (!string.IsNullOrWhiteSpace(i.Imdb)) Put(list, "imdb:" + i.Imdb!.Trim(), rank, of);
+                    if (!string.IsNullOrWhiteSpace(i.Tmdb)) Put(list, "tmdb:" + type + ":" + i.Tmdb!.Trim(), rank, of);
+                    Put(list, "name:" + Norm(i.Name) + "|" + i.Year, rank, of);
+                }
+            }
+
+            foreach (var t in titles)
+                foreach (var p in t.Places.Where(p => p.Rank == null))
+                {
+                    var ids = new List<string>();
+                    if (t.Imdb.Length > 0) ids.Add("imdb:" + t.Imdb);
+                    if (t.Tmdb > 0) { ids.Add("tmdb:" + t.Type + ":" + t.Tmdb); ids.Add("tmdb::" + t.Tmdb); }
+                    ids.Add("name:" + Norm(t.Name) + "|" + t.Year);
+                    foreach (var id in ids)
+                        if (places.TryGetValue(p.List + " | " + id, out var found)) { p.Rank = found.Rank; p.Of = found.Of; break; }
+                }
         }
     }
 }

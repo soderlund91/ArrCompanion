@@ -79,9 +79,9 @@ namespace ArrCompanion
                     Key = t.Key, Type = t.Type, Title = t.Name, Year = t.Year, Imdb = t.Imdb, Tmdb = t.Tmdb, Tvdb = t.Tvdb,
                     Places = t.Places, BestRank = t.BestRank, AddedBefore = added.Contains(t.Key), InstanceId = instance?.Id ?? ""
                 };
-                if (instance == null) row.Status = Status.NoServer;
-                else if (holdings.TryGetValue(kind, out var h) && h != null && h.Has(t)) row.Status = Status.InArr;
+                if (instance != null && holdings.TryGetValue(kind, out var h) && h != null && h.Has(t)) row.Status = Status.InArr;
                 else if (ignored.Contains(t.Key)) row.Status = Status.Ignored;
+                else if (instance == null) row.Status = Status.NoServer;
                 result.Rows.Add(row);
             }
             result.Rows = result.Rows.OrderBy(r => r.BestRank ?? int.MaxValue).ThenBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase).ToList();

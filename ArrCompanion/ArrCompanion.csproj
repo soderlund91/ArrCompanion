@@ -9,7 +9,7 @@
 		<AssemblyTitle>Arr Companion</AssemblyTitle>
 		<AssemblyName>ArrCompanion</AssemblyName>
 		<RootNamespace>ArrCompanion</RootNamespace>
-		<Version>0.1.0.0</Version>
+		<Version>0.2.0.0</Version>
 		<Product>Arr Companion</Product>
 
 		<!-- MSB3277: the Emby DLLs reference newer System.* versions; Emby supplies them at runtime. -->
