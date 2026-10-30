@@ -15,10 +15,11 @@ Shows already in the library, with missing episodes, are left out for now: versi
 
 Settings has one Sonarr and one Radarr. They are saved as a list (`Instances`, each with its own id), and adds and rules pick a server by id, so more than one of each kind only needs the page. Emby's server talks to Sonarr and Radarr. The API keys never reach the browser.
 
-## Build
+## Requirements
+- HomeScreenCompanion v4.5.1.0 and above
+https://github.com/soderlund91/HomeScreenCompanion
+- Sonarr and Radarr with API v3.
 
-```
-dotnet build ArrCompanion/ArrCompanion.csproj -c Release
-```
+## Install
 
-It builds against the Emby DLLs in `%AppData%\Emby-Server\system`. Copy `ArrCompanion.dll` to Emby's `plugins` folder and restart Emby.
+Download the .dll file from latest releases. Place the .dll in you plugin folder. Restart Emby. 
