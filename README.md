@@ -18,7 +18,7 @@ Settings has one Sonarr and one Radarr. They are saved as a list (`Instances`, e
 ## Requirements
 - HomeScreenCompanion v4.5.1.0 and above
 https://github.com/soderlund91/HomeScreenCompanion
-- Sonarr and Radarr with API v3.
+- Sonarr and/or Radarr with API v3.
 
 ## Install
 
