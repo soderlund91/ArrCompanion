@@ -1,0 +1,263 @@
+<div id="ArrCompanionConfigPage" data-role="page" class="page type-interior pluginConfigurationPage"
+     data-require="emby-input,emby-button,emby-checkbox,emby-select"
+     data-controller="__plugin/ArrCompanionJS">
+
+    <style>
+        /* Same restraint as Home Screen Companion (its DESIGN.md): Emby's theme surfaces, hairlines,
+           Emby green as the one primary accent, small tinted status pills. */
+        #ArrCompanionConfigPage, .ac-modal-backdrop {
+            --ac-primary: #52B54B;
+            --ac-primary-hover: #5fc458;
+            --ac-primary-text: #52B54B;
+            --ac-info-text: #5aa9e6;
+            --ac-warning-text: #e6c15a;
+            --ac-danger-text: #e57373;
+            --ac-neutral: #9aa4b0;
+            --ac-tint-1: rgba(128,128,128,0.04);
+            --ac-tint-2: rgba(128,128,128,0.08);
+            --ac-tint-3: rgba(128,128,128,0.15);
+            --ac-hairline: var(--line-color, rgba(128,128,128,0.2));
+            --ac-hairline-strong: rgba(128,128,128,0.3);
+            --ac-popup-bg: #2a2a2a;
+            --ac-popup-ink: #e8e8e8;
+            --ac-input-bg: rgba(255,255,255,0.06);
+        }
+        [data-ac-theme="light"], [data-ac-theme="light"] .ac-modal-backdrop, .ac-modal-backdrop[data-ac-theme="light"] {
+            --ac-primary-text: #3a8c34;
+            --ac-info-text: #2b6cb0;
+            --ac-warning-text: #9a7a12;
+            --ac-danger-text: #cc3333;
+            --ac-popup-bg: #f2f2f2;
+            --ac-popup-ink: #1a1a1a;
+            --ac-input-bg: rgba(0,0,0,0.04);
+        }
+
+        #ArrCompanionConfigPage .content-primary { max-width: 1100px; }
+        .ac-header { display: flex; align-items: baseline; gap: 12px; margin: 0 0 8px; }
+        .ac-header h2 { margin: 0; font-weight: 600; }
+        .ac-version { font-size: 0.8em; color: var(--theme-text-secondary); }
+
+        .ac-tabs { display: flex; border-bottom: 1px solid var(--ac-hairline); margin-bottom: 20px; flex-wrap: wrap; }
+        .ac-tab {
+            background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0;
+            margin-bottom: -1px; padding: 10px 16px; cursor: pointer; font: inherit; font-weight: 500;
+            color: var(--theme-text-secondary); display: inline-flex; align-items: center; gap: 6px;
+        }
+        .ac-tab .md-icon { font-size: 1.15em; }
+        .ac-tab:hover { color: var(--theme-text-primary); }
+        .ac-tab.active { color: var(--theme-text-primary); border-bottom-color: var(--ac-primary); }
+
+        .ac-panel {
+            background: var(--theme-background-level2); border: 1px solid var(--ac-hairline);
+            border-radius: 8px; padding: 16px; margin-bottom: 16px;
+        }
+        .ac-panel-title { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 12px; }
+        .ac-panel-title .md-icon { opacity: 0.65; }
+        .ac-eyebrow { font-size: 0.75em; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--theme-text-secondary); margin: 14px 0 6px; }
+        .ac-muted { color: var(--theme-text-secondary); font-size: 0.88em; }
+        .ac-hint { color: var(--theme-text-secondary); font-size: 0.85em; margin-top: 4px; line-height: 1.4; }
+        .ac-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0 16px; }
+        .ac-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+        .ac-btn {
+            display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 12px;
+            border-radius: 6px; border: 1px solid var(--ac-hairline-strong); background: var(--ac-tint-2);
+            color: var(--theme-text-primary); font: inherit; font-size: 0.9em; font-weight: 500; cursor: pointer; white-space: nowrap;
+        }
+        .ac-btn:hover:not(:disabled) { background: var(--ac-tint-3); }
+        .ac-btn:disabled { opacity: 0.5; cursor: default; }
+        .ac-btn .md-icon { font-size: 1.1em; }
+        .ac-btn.primary { background: var(--ac-primary); border-color: var(--ac-primary); color: #fff; }
+        .ac-btn.primary:hover:not(:disabled) { background: var(--ac-primary-hover); }
+        .ac-btn.small { height: 26px; padding: 0 8px; font-size: 0.82em; }
+        .ac-btn.ghost { background: transparent; border-color: transparent; }
+        .ac-btn.ghost:hover:not(:disabled) { background: var(--ac-tint-2); }
+
+        .ac-input, .ac-select {
+            height: 32px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--ac-hairline-strong);
+            background: var(--ac-input-bg); color: var(--theme-text-primary); font: inherit; font-size: 0.9em; min-width: 0;
+        }
+        .ac-select option { background: var(--ac-popup-bg); color: var(--ac-popup-ink); }
+        .ac-field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; }
+        .ac-field > span { font-size: 0.8em; color: var(--theme-text-secondary); font-weight: 500; }
+        .ac-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.9em; margin: 4px 14px 8px 0; }
+
+        .ac-banner { border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 0.9em; line-height: 1.45; border: 1px solid var(--ac-hairline); background: var(--ac-tint-1); }
+        .ac-banner.warn { border-color: rgba(230,193,90,0.45); color: var(--ac-warning-text); background: rgba(230,193,90,0.08); }
+        .ac-banner.error { border-color: rgba(229,115,115,0.45); color: var(--ac-danger-text); background: rgba(229,115,115,0.08); }
+
+        .ac-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+        .ac-toolbar .ac-input[type=search] { flex: 1 1 200px; }
+        .ac-bulk { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border: 1px solid var(--ac-hairline); border-radius: 8px; background: var(--ac-tint-1); margin-bottom: 10px; flex-wrap: wrap; }
+        .ac-bulk .ac-count { font-size: 0.88em; margin-right: auto; color: var(--theme-text-secondary); }
+
+        .ac-list { border: 1px solid var(--ac-hairline); border-radius: 8px; overflow: hidden; }
+        .ac-item { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 12px; border-top: 1px solid var(--ac-hairline); }
+        .ac-item:first-child { border-top: none; }
+        .ac-item:hover { background: var(--ac-tint-1); }
+        .ac-item.dim { opacity: 0.6; }
+        .ac-item-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+        .ac-item-title .ac-year { color: var(--theme-text-secondary); font-weight: 400; margin-left: 4px; }
+        .ac-item-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; align-items: center; }
+        .ac-item-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+        .ac-empty { padding: 28px; text-align: center; color: var(--theme-text-secondary); }
+
+        .ac-chip {
+            display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 10px;
+            font-size: 0.78em; font-weight: 500; background: var(--ac-tint-2); border: 1px solid var(--ac-hairline); white-space: nowrap;
+        }
+        .ac-chip .ac-rank { font-weight: 700; }
+        .ac-chip.top { border-color: rgba(82,181,75,0.45); background: rgba(82,181,75,0.1); }
+        .ac-chip.top .ac-rank { color: var(--ac-primary-text); }
+        .ac-type { font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; color: var(--theme-text-secondary); }
+
+        .ac-pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75em; font-weight: 600; white-space: nowrap; }
+        .ac-pill.ok { color: var(--ac-primary-text); background: rgba(82,181,75,0.12); }
+        .ac-pill.info { color: var(--ac-info-text); background: rgba(90,169,230,0.12); }
+        .ac-pill.warn { color: var(--ac-warning-text); background: rgba(230,193,90,0.12); }
+        .ac-pill.err { color: var(--ac-danger-text); background: rgba(229,115,115,0.12); }
+        .ac-pill.neutral { color: var(--ac-neutral); background: rgba(154,164,176,0.12); }
+
+        .ac-rule { border: 1px solid var(--ac-hairline); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; background: var(--theme-background-level2); }
+        .ac-rule.off { opacity: 0.65; }
+        .ac-rule-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .ac-rule-head .ac-input { flex: 1 1 auto; font-weight: 600; }
+        .ac-rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0 12px; }
+        .ac-rule-summary { font-size: 0.85em; color: var(--theme-text-secondary); margin: 2px 0 8px; }
+        .ac-preview { margin-top: 8px; font-size: 0.88em; }
+        .ac-preview ol { margin: 6px 0 0; padding-left: 20px; }
+        .ac-preview li { margin: 2px 0; }
+
+        .ac-table { width: 100%; border-collapse: collapse; font-size: 0.88em; }
+        .ac-table th { text-align: left; font-weight: 600; color: var(--theme-text-secondary); font-size: 0.85em; padding: 8px 10px; border-bottom: 1px solid var(--ac-hairline); }
+        .ac-table td { padding: 8px 10px; border-bottom: 1px solid var(--ac-hairline); vertical-align: top; }
+
+        .ac-modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1100; display: flex; align-items: center; justify-content: center; padding: 16px; }
+        .ac-modal {
+            background: var(--ac-popup-bg); color: var(--ac-popup-ink); border-radius: 10px; width: min(560px, 100%);
+            max-height: 90vh; overflow: auto; box-shadow: 0 24px 48px rgba(0,0,0,0.45); padding: 18px 20px;
+        }
+        .ac-modal h3 { margin: 0 0 4px; font-weight: 600; }
+        .ac-modal .ac-input, .ac-modal .ac-select { color: var(--ac-popup-ink); }
+        .ac-modal .ac-field > span, .ac-modal .ac-muted, .ac-modal .ac-hint { color: inherit; opacity: 0.7; }
+        .ac-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+        .ac-modal .ac-btn { color: var(--ac-popup-ink); }
+        .ac-modal .ac-btn.primary { color: #fff; }
+
+        .ac-toast {
+            position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 1200;
+            background: #333; color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 0.9em; box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+        }
+        .ac-spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--ac-hairline-strong); border-top-color: var(--ac-primary); border-radius: 50%; animation: ac-spin 0.8s linear infinite; vertical-align: middle; }
+        @keyframes ac-spin { to { transform: rotate(360deg); } }
+
+        @media (max-width: 640px) {
+            .ac-item { grid-template-columns: 24px minmax(0, 1fr); }
+            .ac-item-actions { grid-column: 2; justify-content: flex-start; }
+        }
+    </style>
+
+    <div class="content-primary">
+        <div class="verticalSection">
+            <div class="ac-header">
+                <h2>Arr Companion</h2>
+                <span class="ac-version">Arr Companion v0.1.0.0</span>
+            </div>
+            <p class="ac-muted" style="margin-top:0;">The titles Home Screen Companion finds missing from the library, and where they are on its lists. Add them to Sonarr and Radarr by hand, or let rules add them.</p>
+
+            <div class="ac-tabs" id="acTabs">
+                <button type="button" class="ac-tab active" data-tab="missing"><i class="md-icon">playlist_add</i>Missing</button>
+                <button type="button" class="ac-tab" data-tab="rules"><i class="md-icon">rule</i>Rules</button>
+                <button type="button" class="ac-tab" data-tab="history"><i class="md-icon">history</i>History</button>
+                <button type="button" class="ac-tab" data-tab="settings"><i class="md-icon">settings</i>Settings</button>
+            </div>
+
+            <!-- Missing -->
+            <div class="ac-tab-content" data-tab-content="missing">
+                <div id="acMissingBanner"></div>
+                <div class="ac-toolbar">
+                    <input type="search" class="ac-input" id="acSearch" placeholder="Search titles" />
+                    <select class="ac-select" id="acFilterType">
+                        <option value="">Movies and shows</option>
+                        <option value="movie">Movies</option>
+                        <option value="show">Shows</option>
+                    </select>
+                    <select class="ac-select" id="acFilterList"><option value="">All lists</option></select>
+                    <select class="ac-select" id="acFilterTop" title="Only titles this high on the list">
+                        <option value="0">Any place</option>
+                        <option value="1">Place 1</option>
+                        <option value="3">Top 3</option>
+                        <option value="5">Top 5</option>
+                        <option value="10">Top 10</option>
+                        <option value="25">Top 25</option>
+                    </select>
+                    <select class="ac-select" id="acFilterStatus">
+                        <option value="missing">Not in Sonarr / Radarr</option>
+                        <option value="inArr">Already in Sonarr / Radarr</option>
+                        <option value="ignored">Ignored</option>
+                        <option value="">Everything</option>
+                    </select>
+                    <select class="ac-select" id="acSort">
+                        <option value="rank">Best place first</option>
+                        <option value="lists">On most lists first</option>
+                        <option value="title">Title</option>
+                        <option value="year">Newest first</option>
+                    </select>
+                    <button type="button" class="ac-btn ghost" id="acRefresh" title="Read the list again"><i class="md-icon">refresh</i></button>
+                </div>
+                <div class="ac-bulk">
+                    <label class="ac-check" style="margin:0;"><input type="checkbox" id="acSelectAll" /> Select all shown</label>
+                    <span class="ac-count" id="acCount"></span>
+                    <button type="button" class="ac-btn small" id="acIgnoreSelected" disabled><i class="md-icon">visibility_off</i>Ignore</button>
+                    <button type="button" class="ac-btn small primary" id="acAddSelected" disabled><i class="md-icon">add</i>Add selected</button>
+                </div>
+                <div class="ac-list" id="acMissingList"><div class="ac-empty"><span class="ac-spin"></span></div></div>
+            </div>
+
+            <!-- Rules -->
+            <div class="ac-tab-content" data-tab-content="rules" style="display:none;">
+                <div class="ac-banner">A rule adds the titles that are missing and high on a list, for example the top 3 of a trending list. A title a rule has added once is not added again, even if it is removed from Sonarr or Radarr later. Rules use the root folder and quality profile set under Settings.</div>
+                <div class="ac-panel">
+                    <label class="ac-check"><input type="checkbox" id="acRunOnChange" /> Run the rules a few minutes after the list changes</label>
+                    <div class="ac-hint">They also run on the scheduled task <b>Arr Companion › Run rules</b> (every 6 hours unless changed under Scheduled Tasks).</div>
+                </div>
+                <div id="acRules"></div>
+                <div class="ac-row" style="margin-top: 6px;">
+                    <button type="button" class="ac-btn" id="acAddRule"><i class="md-icon">add</i>Add rule</button>
+                    <span style="flex:1"></span>
+                    <button type="button" class="ac-btn" id="acRunRules"><i class="md-icon">play_arrow</i>Save and run now</button>
+                    <button type="button" class="ac-btn primary" id="acSaveRules"><i class="md-icon">save</i>Save</button>
+                </div>
+                <div id="acRunResult" class="ac-preview"></div>
+            </div>
+
+            <!-- History -->
+            <div class="ac-tab-content" data-tab-content="history" style="display:none;">
+                <div class="ac-toolbar">
+                    <span class="ac-muted" style="flex:1;">What was added, by hand or by which rule, newest first.</span>
+                    <button type="button" class="ac-btn ghost" id="acHistoryRefresh"><i class="md-icon">refresh</i></button>
+                </div>
+                <div id="acHistory"></div>
+            </div>
+
+            <!-- Settings -->
+            <div class="ac-tab-content" data-tab-content="settings" style="display:none;">
+                <div id="acServers"></div>
+
+                <div class="ac-panel">
+                    <div class="ac-panel-title"><i class="md-icon">description</i>Missing titles file</div>
+                    <div class="ac-field">
+                        <span>File or folder</span>
+                        <input type="text" class="ac-input" id="acListPath" placeholder="Home Screen Companion's file" />
+                    </div>
+                    <div class="ac-hint" id="acListPathHint">Leave empty to read the file Home Screen Companion keeps. It needs Missing titles on, with "Keep the list in a file" and JSON.</div>
+                </div>
+
+                <div class="ac-row">
+                    <span style="flex:1"></span>
+                    <button type="button" class="ac-btn primary" id="acSaveSettings"><i class="md-icon">save</i>Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
