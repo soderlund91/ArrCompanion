@@ -44,6 +44,15 @@ namespace ArrCompanion
             public string? titleSlug { get; set; }
             public int year { get; set; }
             public List<SeasonEntry>? seasons { get; set; }
+            public bool monitored { get; set; }
+            public bool hasFile { get; set; }                       // Radarr: the movie has its file
+            public SeriesStatistics? statistics { get; set; }       // Sonarr
+        }
+
+        public sealed class SeriesStatistics
+        {
+            public int episodeFileCount { get; set; }   // episodes it has a file of …
+            public int episodeCount { get; set; }       // … of its monitored, aired episodes
         }
 
         public sealed class SeasonEntry { public int seasonNumber { get; set; } }
@@ -175,25 +184,33 @@ namespace ArrCompanion
             lock (CacheLock) LibraryCache.Remove(i.Kind + "|" + i.BaseUrl + "|" + i.Key);
         }
 
-        /// <summary>The ids a server holds, to tell which titles it already has.</summary>
+        /// <summary>The ids a server holds, to tell which titles it already has (and how far along they are).</summary>
         internal sealed class Holdings
         {
-            private readonly HashSet<string> _imdb = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            private readonly HashSet<int> _tmdb = new HashSet<int>();
-            private readonly HashSet<int> _tvdb = new HashSet<int>();
+            private readonly Dictionary<string, LibraryEntry> _imdb = new Dictionary<string, LibraryEntry>(StringComparer.OrdinalIgnoreCase);
+            private readonly Dictionary<int, LibraryEntry> _tmdb = new Dictionary<int, LibraryEntry>();
+            private readonly Dictionary<int, LibraryEntry> _tvdb = new Dictionary<int, LibraryEntry>();
 
             internal Holdings(IEnumerable<LibraryEntry> entries)
             {
                 foreach (var e in entries)
                 {
-                    if (!string.IsNullOrEmpty(e.imdbId)) _imdb.Add(e.imdbId!);
-                    if (e.tmdbId > 0) _tmdb.Add(e.tmdbId);
-                    if (e.tvdbId > 0) _tvdb.Add(e.tvdbId);
+                    if (!string.IsNullOrEmpty(e.imdbId) && !_imdb.ContainsKey(e.imdbId!)) _imdb[e.imdbId!] = e;
+                    if (e.tmdbId > 0 && !_tmdb.ContainsKey(e.tmdbId)) _tmdb[e.tmdbId] = e;
+                    if (e.tvdbId > 0 && !_tvdb.ContainsKey(e.tvdbId)) _tvdb[e.tvdbId] = e;
                 }
             }
 
-            internal bool Has(MissingList.Title t) =>
-                (t.Imdb.Length > 0 && _imdb.Contains(t.Imdb)) || (t.Tmdb > 0 && _tmdb.Contains(t.Tmdb)) || (t.Tvdb > 0 && _tvdb.Contains(t.Tvdb));
+            internal LibraryEntry? Find(MissingList.Title t)
+            {
+                LibraryEntry? e = null;
+                if (t.Imdb.Length > 0 && _imdb.TryGetValue(t.Imdb, out e)) return e;
+                if (t.Tmdb > 0 && _tmdb.TryGetValue(t.Tmdb, out e)) return e;
+                if (t.Tvdb > 0 && _tvdb.TryGetValue(t.Tvdb, out e)) return e;
+                return null;
+            }
+
+            internal bool Has(MissingList.Title t) => Find(t) != null;
         }
 
         // ---- The add dialog ----

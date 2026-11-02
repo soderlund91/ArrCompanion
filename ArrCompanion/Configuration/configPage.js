@@ -22,7 +22,9 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         options: {},       // instance id (or url|key) -> { RootFolders, QualityProfiles }
         posters: {},       // key -> poster url ('' = none)
         posterAsked: {},   // key -> true while asked
-        noTmdbKey: false   // no TMDb key: posters are not asked for
+        noTmdbKey: false,  // no way to look posters up: they are not asked for
+        type: '',          // Movies / Shows chip: '' | 'movie' | 'show'
+        view: 'list'       // 'list' | 'posters'
     };
 
     function storedView() { try { return localStorage.getItem('arrCompanionView') || 'list'; } catch (e) { return 'list'; } }
@@ -157,7 +159,11 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         var sel = view.querySelector('#acFilterList');
         var current = sel.value;
         var lists = (state.catalog && state.catalog.Lists) || [];
-        sel.innerHTML = option('', 'All lists', !current) + lists.map(function (l) { return option(l, l, l === current); }).join('');
+        var counts = {};
+        ((state.catalog && state.catalog.Rows) || []).forEach(function (r) {
+            (r.Places || []).forEach(function (p) { counts[p.List] = (counts[p.List] || 0) + 1; });
+        });
+        sel.innerHTML = option('', 'All lists', !current) + lists.map(function (l) { return option(l, l + ' · ' + (counts[l] || 0), l === current); }).join('');
     }
 
     function renderBanner(view) {
@@ -198,17 +204,18 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         return ranked[0] || places[0] || null;
     }
 
-    function visibleRows(view) {
+    // The rows the filters let through; ignoreType: all but the Movies / Shows chip (for the chips' counts).
+    function visibleRows(view, ignoreType) {
         var rows = (state.catalog && state.catalog.Rows) || [];
         var q = view.querySelector('#acSearch').value.trim().toLowerCase();
-        var type = view.querySelector('#acFilterType').value;
+        var type = ignoreType ? '' : state.type;
         var list = view.querySelector('#acFilterList').value;
         var top = int(view.querySelector('#acFilterTop').value);
         var status = view.querySelector('#acFilterStatus').value;
         var sort = view.querySelector('#acSort').value;
 
         var out = rows.filter(function (r) {
-            if (q && (r.Title || '').toLowerCase().indexOf(q) < 0) return false;
+            if (q && (r.Title || '').toLowerCase().indexOf(q) < 0 && (r.Imdb || '').toLowerCase().indexOf(q) < 0) return false;
             if (type && r.Type !== type) return false;
             if (status === 'missing' && r.Status !== 'missing' && r.Status !== 'noServer') return false;
             if (status && status !== 'missing' && r.Status !== status) return false;
@@ -252,6 +259,46 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         return '<div class="ac-places">' + html + '</div>';
     }
 
+    // The lists a title is on, as tags with its place: "IMDb Top 250 #3". The filtered list first.
+    function placeTags(row, list) {
+        return '<div class="ac-srcs">' + sortedPlaces(row, list).map(function (p) {
+            var cls = 'ac-src' + (p.Rank != null && p.Rank <= 3 ? ' top' : '') + (list && p.List === list ? ' focus' : '');
+            var title = p.Rank == null ? esc(p.List) + ': place not known' : 'Place ' + p.Rank + (p.Of ? ' of ' + p.Of : '') + ' on ' + esc(p.List);
+            return '<span class="' + cls + '" title="' + title + '">' + esc(p.List) + (p.Rank != null ? ' <b>#' + p.Rank + '</b>' : '') + '</span>';
+        }).join('') + '</div>';
+    }
+
+    function imdbLink(row) {
+        return row.Imdb ? '<a href="https://www.imdb.com/title/' + encodeURIComponent(row.Imdb) + '/" target="_blank" rel="noopener">' + esc(row.Imdb) + '</a>' : '';
+    }
+
+    // + Radarr (add), ✓ Radarr (already there: monitored, downloaded / episodes on hover), or a warning add without a server.
+    function arrPill(row) {
+        var k = kindOf(row.Type);
+        var server = esc(instanceLabel(instanceOf(k.kind), k));
+        if (row.Status === 'inArr') {
+            var detail = (row.ArrMonitored ? 'monitored' : 'unmonitored') + (k.kind === 'sonarr'
+                ? (row.ArrEpisodes > 0 ? ', ' + row.ArrEpisodeFiles + ' of ' + row.ArrEpisodes + ' episodes' : '')
+                : ', ' + (row.ArrDownloaded ? 'downloaded' : 'not downloaded'));
+            return '<span class="ac-arr in" title="In ' + server + ': ' + detail + '"><i class="md-icon">check</i>' + server + '</span>';
+        }
+        if (row.Status === 'noServer')
+            return '<button type="button" class="ac-arr warn" data-action="add" data-key="' + esc(row.Key) + '" title="' + k.label + ' is not set up yet: set it up under Settings to add this"><i class="md-icon">link_off</i>' + server + '</button>';
+        if (isOpen(row))
+            return '<button type="button" class="ac-arr add" data-action="add" data-key="' + esc(row.Key) + '" title="Add to ' + server + '"><i class="md-icon">add</i>' + server + '</button>';
+        return '';
+    }
+
+    function renderTypeChips(view) {
+        var rows = visibleRows(view, true);
+        var movies = rows.filter(function (r) { return r.Type !== 'show'; }).length;
+        var chips = [['', 'list', 'All', rows.length], ['movie', 'movie', 'Movies', movies], ['show', 'tv', 'Shows', rows.length - movies]];
+        view.querySelector('#acTypeChips').innerHTML = chips.map(function (c) {
+            return '<button type="button" class="ac-filter-chip' + (state.type === c[0] ? ' active' : '') + '" data-type="' + c[0] + '"><i class="md-icon">' + c[1] + '</i>' + c[2] + ' ' + c[3] + '</button>';
+        }).join('');
+        view.querySelectorAll('#acView button').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-view') === state.view); });
+    }
+
     function posterHtml(row) {
         var url = state.posters[row.Key];
         return '<div class="ac-poster" data-poster-key="' + esc(row.Key) + '">'
@@ -290,7 +337,6 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
 
     function statusPill(row) {
         var k = kindOf(row.Type);
-        if (row.Status === 'inArr') return '<span class="ac-pill ok">In ' + esc(instanceLabel(instanceOf(k.kind), k)) + '</span>';
         if (row.Status === 'ignored') return '<span class="ac-pill neutral">Hidden</span>';
         if (row.Status === 'noServer') return '<span class="ac-pill warn">No ' + k.label + ' set up</span>';
         if (row.AddedBefore) return '<span class="ac-pill neutral" title="Added once by Arr Companion and since removed. Rules leave it alone.">Added before</span>';
@@ -299,6 +345,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
 
     function renderMissing(view) {
         renderBanner(view);
+        renderTypeChips(view);
         var listEl = view.querySelector('#acMissingList');
         var rows = visibleRows(view);
         var list = view.querySelector('#acFilterList').value;
@@ -306,42 +353,46 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             var none = state.catalog && state.catalog.File && state.catalog.File.Found ? 'Nothing matches.' : 'No titles yet.';
             listEl.innerHTML = '<div class="ac-empty">' + none + '</div>';
         } else {
-            var grid = view.querySelector('#acView').value === 'posters';
-            listEl.innerHTML = '<div class="' + (grid ? 'ac-grid-view' : 'ac-list') + '">' + rows.map(function (r) {
-                var k = kindOf(r.Type);
+            var grid = state.view === 'posters';
+            var hasRank = rows.some(function (r) { var p = bestPlace(r, list); return p && p.Rank != null; });
+            listEl.innerHTML = '<div class="' + (grid ? 'ac-grid-view' : 'ac-list') + (hasRank ? '' : ' ac-norank') + '">' + rows.map(function (r) {
                 var selectable = isOpen(r) || r.Status === 'ignored';
-                var server = esc(instanceLabel(instanceOf(k.kind), k));
                 var picked = selectable && state.selected[r.Key];
                 var check = selectable ? checkbox('class="acSel" data-key="' + esc(r.Key) + '"', picked) : '';
                 var rowAttrs = ' data-key="' + esc(r.Key) + '"';
                 var rowCls = (selectable ? ' selectable' : '') + (picked ? ' selected' : '');
-                var addBtn = r.Status === 'noServer'
-                    ? '<button type="button" class="ac-btn small warn" data-action="add" data-key="' + esc(r.Key) + '" title="' + k.label + ' is not set up yet: set it up under Settings to add this"><i class="md-icon">link_off</i>' + server + '</button>'
-                    : '<button type="button" class="ac-btn small" data-action="add" data-key="' + esc(r.Key) + '"><i class="md-icon">add</i>' + server + '</button>';
                 var ignoreBtn = '<button type="button" class="ac-btn small ghost" data-action="ignore" data-key="' + esc(r.Key) + '" title="Hide: not shown as missing, and no rule adds it. Hidden titles are under Show hidden."><i class="md-icon">visibility_off</i></button>';
                 var unignoreBtn = '<button type="button" class="ac-btn small ghost" data-action="unignore" data-key="' + esc(r.Key) + '" title="Show it again"><i class="md-icon">visibility</i>' + (grid ? '' : 'Unhide') + '</button>';
-                var actions = isOpen(r) ? addBtn + ignoreBtn : r.Status === 'ignored' ? unignoreBtn : '';
+                var actions = arrPill(r) + (isOpen(r) ? ignoreBtn : r.Status === 'ignored' ? unignoreBtn : '');
                 var dim = r.Status === 'inArr' || r.Status === 'ignored' ? ' dim' : '';
-                var typeAndStatus = '<span class="ac-type">' + (r.Type === 'show' ? 'Show' : 'Movie') + '</span>' + statusPill(r);
-                var titleHtml = '<div class="ac-item-title" title="' + esc(r.Title) + '">' + esc(r.Title) + (r.Year ? '<span class="ac-year">(' + r.Year + ')</span>' : '') + '</div>';
+                var best = bestPlace(r, list);
+                var rank = best && best.Rank != null ? best.Rank : null;
                 if (grid) {
-                    var best = bestPlace(r, list);
+                    var cardMeta = [];
+                    if (r.Year) cardMeta.push(r.Year);
+                    cardMeta.push(esc((r.Places || []).map(function (p) { return p.List; }).join(', ')));
                     return '<div class="ac-card' + dim + rowCls + '"' + rowAttrs + '>'
-                        + posterHtml(r)
+                        + '<div class="ac-cover">' + posterHtml(r)
+                        + (rank != null ? '<div class="ac-card-rank' + (rank <= 3 ? ' top' : '') + '">#' + rank + '</div>' : '')
                         + (check ? '<div class="ac-card-sel">' + check + '</div>' : '')
-                        + (best && best.Rank != null ? '<div class="ac-card-rank' + (best.Rank <= 3 ? ' top' : '') + '">#' + best.Rank + '</div>' : '')
-                        + '<div class="ac-card-body">' + titleHtml
-                        + '<div class="ac-item-meta" style="margin-top:0;">' + typeAndStatus + '</div>'
-                        + placeLines(r, list, 3)
+                        + '</div>'
+                        + '<div class="ac-card-title" title="' + esc(r.Title) + '">' + esc(r.Title) + '</div>'
+                        + '<div class="ac-card-meta">' + cardMeta.join(' · ') + statusPill(r) + '</div>'
                         + (actions ? '<div class="ac-card-actions">' + actions + '</div>' : '')
-                        + '</div></div>';
+                        + '</div>';
                 }
+                var meta = [];
+                if (r.Year) meta.push(r.Year);
+                meta.push(r.Type === 'show' ? 'Series' : 'Movie');
+                if (r.Imdb) meta.push(imdbLink(r));
                 return '<div class="ac-item' + dim + rowCls + '"' + rowAttrs + '>'
-                    + '<div>' + check + '</div>'
+                    + '<div class="ac-item-check">' + check + '</div>'
+                    + '<div class="ac-rank-col">' + (rank != null ? rank : '') + '</div>'
                     + posterHtml(r)
-                    + '<div style="min-width:0;">' + titleHtml
-                    + '<div class="ac-item-meta">' + typeAndStatus + '</div>'
-                    + placeLines(r, list, 0)
+                    + '<div class="ac-item-info">'
+                    + '<div class="ac-item-title">' + esc(r.Title) + '</div>'
+                    + '<div class="ac-item-meta"><span>' + meta.join(' · ') + '</span>' + statusPill(r) + '</div>'
+                    + placeTags(r, list)
                     + '</div>'
                     + '<div class="ac-item-actions">' + actions + '</div>'
                     + '</div>';
@@ -680,7 +731,8 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             + '<div class="ac-panel-title"><i class="md-icon">' + (k.kind === 'radarr' ? 'movie' : 'tv') + '</i>' + k.label + '</div>'
             + '<div class="ac-grid">'
             + '<label class="ac-field"><span>URL</span><input type="text" class="ac-input" data-s="Url" placeholder="http://localhost:' + k.port + '" value="' + esc(i.Url || '') + '" /></label>'
-            + '<label class="ac-field"><span>API key</span><input type="text" class="ac-input" data-s="ApiKey" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore value="' + esc(i.ApiKey || '') + '" /></label>'
+            + '<div class="ac-field"><span>API key</span><input type="text" class="ac-input ac-key" data-s="ApiKey" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore value="' + esc(i.ApiKey || '') + '" />'
+            + '<label class="ac-show-key"><input type="checkbox" data-show-key /> Show</label></div>'
             + '</div>'
             + '<div class="ac-row"><button type="button" class="ac-btn small" data-server-action="test"><i class="md-icon">wifi_tethering</i>Test connection</button><span class="ac-muted" data-test-result></span></div>'
             + '<div class="ac-hint">The API key is under Settings › General in ' + k.label + '. It stays on the Emby server; the browser never talks to ' + k.label + '.</div>'
@@ -797,11 +849,21 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         });
 
         // Missing
-        ['#acSearch', '#acFilterType', '#acFilterList', '#acFilterTop', '#acFilterStatus', '#acSort', '#acView'].forEach(function (sel) {
-            view.querySelector(sel).addEventListener(sel === '#acSearch' ? 'input' : 'change', function () {
-                if (sel === '#acView') storeView(view.querySelector('#acView').value);
-                renderMissing(view);
-            });
+        ['#acSearch', '#acFilterList', '#acFilterTop', '#acFilterStatus', '#acSort'].forEach(function (sel) {
+            view.querySelector(sel).addEventListener(sel === '#acSearch' ? 'input' : 'change', function () { renderMissing(view); });
+        });
+        view.querySelector('#acTypeChips').addEventListener('click', function (e) {
+            var chip = e.target.closest('[data-type]');
+            if (!chip) return;
+            state.type = chip.getAttribute('data-type');
+            renderMissing(view);
+        });
+        view.querySelector('#acView').addEventListener('click', function (e) {
+            var b = e.target.closest('[data-view]');
+            if (!b) return;
+            state.view = b.getAttribute('data-view');
+            storeView(state.view);
+            renderMissing(view);
         });
         view.querySelector('#acRefresh').addEventListener('click', function () { loadMissing(view); });
         function pick(key, on) {
@@ -907,12 +969,17 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             testServer(view, KINDS.filter(function (k) { return k.kind === kind; })[0]);
         });
         view.querySelector('#acSaveSettings').addEventListener('click', function () { saveSettings(view); });
+        view.querySelector('[data-tab-content="settings"]').addEventListener('change', function (e) {
+            if (!e.target.hasAttribute('data-show-key')) return;
+            var input = e.target.closest('.ac-field').querySelector('.ac-key');
+            if (input) input.classList.toggle('shown', e.target.checked);
+        });
     }
 
     return function (view) {
         view.addEventListener('viewshow', function () {
             applyTheme(view);
-            view.querySelector('#acView').value = storedView();
+            state.view = storedView() === 'posters' ? 'posters' : 'list';
             if (!view.dataset.acInit) {
                 view.dataset.acInit = '1';
                 bind(view);

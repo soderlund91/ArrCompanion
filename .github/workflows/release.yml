@@ -1,0 +1,90 @@
+# Build every PR, and on every push to main build the plugin and publish it as a GitHub Release.
+# Version = the project's <Version> major.minor, then 0, then the run number: 0.2.0.12.
+# Windows: the project's InjectVersionIntoHtml target runs Windows PowerShell.
+name: Build and release
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+env:
+  PROJECT: ArrCompanion/ArrCompanion.csproj
+  DLL: ArrCompanion/bin/Release/netstandard2.0/ArrCompanion.dll
+  # Emby reference assemblies; the plugin binds to the server's own copies at runtime.
+  EMBY_SDK_VERSION: 4.10.0.24-beta2
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Fetch Emby reference DLLs
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sys = Join-Path $env:RUNNER_TEMP 'emby\Emby-Server\system'
+          New-Item -ItemType Directory -Force -Path $sys | Out-Null
+          foreach ($pkg in 'mediabrowser.common', 'mediabrowser.server.core') {
+            $zip = Join-Path $env:RUNNER_TEMP "$pkg.zip"
+            $dir = Join-Path $env:RUNNER_TEMP $pkg
+            Invoke-WebRequest -Uri "https://api.nuget.org/v3-flatcontainer/$pkg/$env:EMBY_SDK_VERSION/$pkg.$env:EMBY_SDK_VERSION.nupkg" -OutFile $zip
+            Expand-Archive -Path $zip -DestinationPath $dir -Force
+            Copy-Item (Join-Path $dir 'lib\netstandard2.0\*.dll') $sys
+          }
+          Get-ChildItem $sys | Select-Object -ExpandProperty Name
+
+      - name: Work out version
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $m = Select-String -Path $env:PROJECT -Pattern '<Version>(\d+)\.(\d+)\.' | Select-Object -First 1
+          if (-not $m) { throw "No <Version> in $env:PROJECT" }
+          $ver = '{0}.{1}.0.{2}' -f $m.Matches[0].Groups[1].Value, $m.Matches[0].Groups[2].Value, $env:GITHUB_RUN_NUMBER
+          "VER=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TAG=v$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "Version $ver"
+
+      - name: Build
+        run: |
+          dotnet build $env:PROJECT -c Release "-p:AppData=$env:RUNNER_TEMP\emby" "-p:Version=$env:VER" --verbosity minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload plugin DLL artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ArrCompanion-${{ env.VER }}
+          path: ${{ env.DLL }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Arr Companion ${{ env.VER }}
+          files: ${{ env.DLL }}
+          fail_on_unmatched_files: true
+          make_latest: true
+          body: |
+            Build of `${{ github.sha }}` on `main`.
+
+            Download `ArrCompanion.dll`, place it in your Emby plugins folder and restart Emby.

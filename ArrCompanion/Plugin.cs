@@ -1,14 +1,16 @@
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
+using MediaBrowser.Model.Drawing;
 using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace ArrCompanion
 {
-    public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
+    public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages, IHasThumbImage
     {
         public override string Name => "Arr Companion";
 
@@ -62,5 +64,14 @@ namespace ArrCompanion
                 }
             };
         }
+
+        public Stream GetThumbImage()
+        {
+            var asm = GetType().Assembly;
+            var path = asm.GetManifestResourceNames().FirstOrDefault(r => r.EndsWith("thumb.png"));
+            return (path != null ? asm.GetManifestResourceStream(path) : Stream.Null) ?? Stream.Null;
+        }
+
+        public ImageFormat ThumbImageFormat => ImageFormat.Png;
     }
 }

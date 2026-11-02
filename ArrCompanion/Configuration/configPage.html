@@ -76,6 +76,10 @@
         .ac-btn.warn:hover:not(:disabled) { background: rgba(230,193,90,0.16); }
         .ac-btn.ghost:hover:not(:disabled) { background: var(--ac-tint-2); }
 
+        /* API keys: hidden unless Show is on */
+        .ac-key:not(.shown) { -webkit-text-security: disc; text-security: disc; }
+        .ac-show-key { display: inline-flex; align-self: flex-start; align-items: center; gap: 5px; font-size: 0.85em; opacity: 0.75; margin-top: 4px; cursor: pointer; }
+        .ac-show-key input { margin: 0; }
         .ac-input, .ac-select {
             height: 32px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--ac-hairline-strong);
             background: var(--ac-input-bg); color: var(--theme-text-primary); font: inherit; font-size: 0.9em; min-width: 0;
@@ -97,8 +101,18 @@
         .ac-bulk { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border: 1px solid var(--ac-hairline); border-radius: 8px; background: var(--ac-tint-1); margin-bottom: 10px; flex-wrap: wrap; }
         .ac-bulk .ac-count { font-size: 0.88em; margin-right: auto; color: var(--theme-text-secondary); }
 
-        .ac-list { border: 1px solid var(--ac-hairline); border-radius: 8px; overflow: hidden; }
-        .ac-item { display: grid; grid-template-columns: 24px 54px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--ac-hairline); }
+        /* Movies / Shows chips and the list / poster toggle */
+        .ac-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+        .ac-filter-chip { cursor: pointer; border: 1px solid var(--ac-hairline-strong); background: transparent; color: inherit; border-radius: 9999px; padding: 4px 12px; font: inherit; font-size: 0.85em; display: inline-flex; align-items: center; gap: 6px; }
+        .ac-filter-chip:hover { background: var(--ac-tint-2); }
+        .ac-filter-chip.active { background: var(--ac-tint-3); border-color: var(--theme-text-secondary); }
+        .ac-filter-chip .md-icon { font-size: 1.1em; }
+        .ac-view { margin-left: auto; display: inline-flex; border: 1px solid var(--ac-hairline); border-radius: 8px; padding: 2px; background: var(--ac-tint-1); }
+        .ac-view button { background: transparent; border: none; color: var(--theme-text-secondary); cursor: pointer; padding: 4px 8px; border-radius: 6px; line-height: 0; }
+        .ac-view button.active { background: var(--ac-tint-3); color: var(--theme-text-primary); }
+
+        .ac-list { border: 1px solid var(--ac-hairline); border-radius: 8px; overflow: hidden; background: var(--theme-background-level2); }
+        .ac-item { display: flex; gap: 12px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--ac-hairline); }
         .ac-item:first-child { border-top: none; }
         .ac-item.selectable { cursor: pointer; }
         .ac-item:hover { background: var(--ac-tint-1); }
@@ -106,11 +120,35 @@
         .ac-item.selected { background: rgba(82,181,75,0.05); box-shadow: inset 2px 0 0 rgba(82,181,75,0.6); }
         .ac-item.selected:hover { background: rgba(82,181,75,0.08); }
         .ac-item .ac-cb { margin: 0 !important; }
+        .ac-item-check { width: 24px; flex-shrink: 0; }
+        .ac-item-info { flex: 1; min-width: 0; }
+        .ac-item .ac-poster { width: 40px; flex-shrink: 0; }
+        /* The best place, before the poster; hidden when no title has one */
+        .ac-rank-col { min-width: 2em; text-align: right; font-size: 0.85em; color: var(--theme-text-secondary); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+        .ac-norank .ac-rank-col { display: none; }
         .ac-item.dim { opacity: 0.6; }
         .ac-item-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
         .ac-item-title .ac-year { color: var(--theme-text-secondary); font-weight: 400; margin-left: 4px; }
-        .ac-item-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; align-items: center; }
-        .ac-item-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+        .ac-item-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; align-items: center; font-size: 0.8em; color: var(--theme-text-secondary); }
+        .ac-item-meta a { color: inherit; text-decoration: none; border-bottom: 1px dotted currentColor; }
+        .ac-item-meta a:hover { color: var(--ac-info-text); }
+        .ac-item-meta .ac-pill { font-size: 0.92em; }
+        .ac-item-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; flex-shrink: 0; }
+        /* The lists a title is on, with its place: "IMDb Top 250 #3" */
+        .ac-srcs { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+        .ac-src { font-size: 0.75em; padding: 1px 7px; border-radius: 4px; background: var(--ac-tint-3); color: var(--theme-text-secondary); white-space: nowrap; }
+        .ac-src b { font-weight: 600; color: var(--theme-text-primary); }
+        .ac-src.top b { color: var(--ac-primary-text); }
+        .ac-src.focus { box-shadow: inset 0 0 0 1px var(--ac-hairline-strong); }
+
+        /* + Radarr / ✓ Radarr */
+        .ac-arr { flex-shrink: 0; height: 30px; padding: 0 11px 0 8px; border-radius: 15px; display: inline-flex; align-items: center; gap: 4px; font: inherit; font-size: 0.8em; color: inherit; background: transparent; border: 1px solid var(--ac-hairline-strong); cursor: pointer; white-space: nowrap; }
+        .ac-arr .md-icon { font-size: 16px; }
+        .ac-arr.add:hover { background: var(--ac-tint-2); border-color: var(--ac-primary); }
+        .ac-arr.add .md-icon { color: var(--ac-primary-text); }
+        .ac-arr.in { background: rgba(82,181,75,0.15); color: var(--ac-primary-text); border-color: transparent; cursor: default; }
+        .ac-arr.warn { border-color: rgba(230,193,90,0.55); color: var(--ac-warning-text); background: rgba(230,193,90,0.08); }
+        .ac-arr.warn:hover { background: rgba(230,193,90,0.16); }
         .ac-poster {
             width: 54px; aspect-ratio: 2 / 3; border-radius: 4px; background: var(--ac-tint-3) center / cover no-repeat;
             display: flex; align-items: center; justify-content: center; overflow: hidden; color: var(--theme-text-secondary);
@@ -129,25 +167,25 @@
         .ac-place.focus .ac-list-name { font-weight: 600; }
 
         /* Poster view */
-        .ac-grid-view { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
-        .ac-card { position: relative; display: flex; flex-direction: column; border-radius: 8px; border: 1px solid var(--ac-hairline); background: var(--theme-background-level2); overflow: hidden; }
+        .ac-grid-view { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 16px; }
+        .ac-card { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
         .ac-card.dim { opacity: 0.6; }
         .ac-card.selectable { cursor: pointer; }
-        .ac-card.selected { border-color: rgba(82,181,75,0.55); background: rgba(82,181,75,0.05); }
+        .ac-cover { position: relative; border-radius: 8px; }
+        .ac-card.selected .ac-cover { box-shadow: 0 0 0 2px var(--ac-primary); }
+        .ac-card .ac-poster { width: 100%; border-radius: 8px; }
+        .ac-card .ac-poster .md-icon { font-size: 2em; }
+        .ac-card-sel { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.55); border-radius: 4px; padding: 2px 3px; line-height: 0; }
         .ac-card-sel .ac-cb { margin: 0 !important; }
-        .ac-card .ac-poster { width: 100%; border-radius: 0; }
-        .ac-card .ac-poster .md-icon { font-size: 2.4em; }
-        .ac-card-sel { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,0.55); border-radius: 4px; padding: 2px 3px; line-height: 0; }
-        .ac-card-rank { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.7); color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 0.8em; font-weight: 700; }
+        /* Only the box: Emby's checkbox keeps room for a label text after it */
+        .ac-card-sel .checkboxLabel { padding-right: 0 !important; }
+        .ac-card-sel .checkboxLabel::before { margin-right: 0 !important; }
+        .ac-card-rank { position: absolute; top: 6px; left: 6px; font-size: 0.75em; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: rgba(0,0,0,0.65); color: #fff; }
         .ac-card-rank.top { background: var(--ac-primary); }
-        .ac-card-body { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
-        .ac-card-body .ac-item-title { white-space: nowrap; font-size: 0.92em; }
-        .ac-card-body .ac-places { font-size: 0.78em; margin-top: 0; }
-        .ac-card-body .ac-place { gap: 4px; }
-        .ac-card-body .ac-place .ac-rank { min-width: 22px; }
-        .ac-card-actions { display: flex; gap: 4px; margin-top: auto; padding-top: 6px; }
-        .ac-card-actions .ac-btn { flex: 1; justify-content: center; }
-        .ac-card-actions .ac-btn.ghost { flex: 0 0 auto; }
+        .ac-card-title { font-size: 0.85em; font-weight: 500; line-height: 1.3; overflow-wrap: anywhere; }
+        .ac-card-meta { font-size: 0.75em; color: var(--theme-text-secondary); }
+        .ac-card-meta .ac-pill { font-size: 0.95em; margin-left: 2px; }
+        .ac-card-actions { display: flex; gap: 4px; align-items: center; }
 
         .ac-empty { padding: 28px; text-align: center; color: var(--theme-text-secondary); }
 
@@ -158,7 +196,6 @@
         .ac-chip .ac-rank { font-weight: 700; }
         .ac-chip.top { border-color: rgba(82,181,75,0.45); background: rgba(82,181,75,0.1); }
         .ac-chip.top .ac-rank { color: var(--ac-primary-text); }
-        .ac-type { font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; color: var(--theme-text-secondary); }
 
         .ac-pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75em; font-weight: 600; white-space: nowrap; }
         .ac-pill.ok { color: var(--ac-primary-text); background: rgba(82,181,75,0.12); }
@@ -203,9 +240,8 @@
         @keyframes ac-spin { to { transform: rotate(360deg); } }
 
         @media (max-width: 640px) {
-            .ac-item { grid-template-columns: 24px 44px minmax(0, 1fr); }
-            .ac-item .ac-poster { width: 44px; }
-            .ac-item-actions { grid-column: 3; justify-content: flex-start; }
+            .ac-item { flex-wrap: wrap; }
+            .ac-item-actions { width: 100%; justify-content: flex-start; padding-left: 36px; }
         }
     </style>
 
@@ -229,11 +265,6 @@
                 <div id="acMissingBanner"></div>
                 <div class="ac-toolbar">
                     <input type="search" class="ac-input" id="acSearch" placeholder="Search titles" />
-                    <select class="ac-select" id="acFilterType">
-                        <option value="">Movies and shows</option>
-                        <option value="movie">Movies</option>
-                        <option value="show">Shows</option>
-                    </select>
                     <select class="ac-select" id="acFilterList"><option value="">All lists</option></select>
                     <select class="ac-select" id="acFilterTop" title="Only titles this high on the list">
                         <option value="0">Any place</option>
@@ -255,11 +286,14 @@
                         <option value="title">Title</option>
                         <option value="year">Newest first</option>
                     </select>
-                    <select class="ac-select" id="acView" title="View">
-                        <option value="list">List</option>
-                        <option value="posters">Posters</option>
-                    </select>
                     <button type="button" class="ac-btn ghost" id="acRefresh" title="Read the list again"><i class="md-icon">refresh</i></button>
+                </div>
+                <div class="ac-bar">
+                    <span id="acTypeChips" class="ac-row"></span>
+                    <div class="ac-view" id="acView">
+                        <button type="button" data-view="list" title="List"><i class="md-icon">view_list</i></button>
+                        <button type="button" data-view="posters" title="Posters"><i class="md-icon">grid_view</i></button>
+                    </div>
                 </div>
                 <div class="ac-bulk">
                     <label class="checkboxContainer ac-cb" style="margin:0 !important;"><input type="checkbox" is="emby-checkbox" id="acSelectAll" /><span>Select all shown</span></label>
@@ -314,7 +348,8 @@
                     <div class="ac-panel-title"><i class="md-icon">image</i>Posters</div>
                     <div class="ac-field">
                         <span>TMDb API key or read access token</span>
-                        <input type="text" class="ac-input" id="acTmdbKey" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="Home Screen Companion's key" />
+                        <input type="text" class="ac-input ac-key" id="acTmdbKey" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="Home Screen Companion's key" />
+                        <label class="ac-show-key"><input type="checkbox" data-show-key /> Show</label>
                     </div>
                     <div class="ac-hint">Leave empty to use the TMDb key set in Home Screen Companion. The posters are looked up once and kept; the browser loads them from TMDb.</div>
                 </div>

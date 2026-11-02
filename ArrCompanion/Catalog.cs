@@ -35,6 +35,11 @@ namespace ArrCompanion
             public string Status { get; set; } = Catalog.Status.Missing;
             public bool AddedBefore { get; set; }       // in the history: added (or found there) by the plugin
             public string InstanceId { get; set; } = "";
+            // Already in Sonarr / Radarr: how far along it is there.
+            public bool ArrMonitored { get; set; }
+            public bool ArrDownloaded { get; set; }     // Radarr: the movie has its file
+            public int ArrEpisodeFiles { get; set; }    // Sonarr: episodes it has a file of …
+            public int ArrEpisodes { get; set; }        // … of its monitored, aired episodes
         }
 
         public sealed class Result
@@ -79,7 +84,15 @@ namespace ArrCompanion
                     Key = t.Key, Type = t.Type, Title = t.Name, Year = t.Year, Imdb = t.Imdb, Tmdb = t.Tmdb, Tvdb = t.Tvdb,
                     Places = t.Places, BestRank = t.BestRank, AddedBefore = added.Contains(t.Key), InstanceId = instance?.Id ?? ""
                 };
-                if (instance != null && holdings.TryGetValue(kind, out var h) && h != null && h.Has(t)) row.Status = Status.InArr;
+                var held = instance != null && holdings.TryGetValue(kind, out var h) && h != null ? h.Find(t) : null;
+                if (held != null)
+                {
+                    row.Status = Status.InArr;
+                    row.ArrMonitored = held.monitored;
+                    row.ArrDownloaded = held.hasFile;
+                    row.ArrEpisodeFiles = held.statistics?.episodeFileCount ?? 0;
+                    row.ArrEpisodes = held.statistics?.episodeCount ?? 0;
+                }
                 else if (ignored.Contains(t.Key)) row.Status = Status.Ignored;
                 else if (instance == null) row.Status = Status.NoServer;
                 result.Rows.Add(row);

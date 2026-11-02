@@ -1,4 +1,5 @@
 using MediaBrowser.Controller.Net;
+using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Serialization;
 using MediaBrowser.Model.Services;
@@ -115,7 +116,7 @@ namespace ArrCompanion
 
     public class PostersResponse
     {
-        public bool HasKey { get; set; }    // a TMDb key to ask with (Arr Companion's or Home Screen Companion's)
+        public bool HasKey { get; set; }    // posters can be looked up: a TMDb key (Arr Companion's or Home Screen Companion's), or Emby's metadata search
         public List<PosterItem> Posters { get; set; } = new List<PosterItem>();
     }
 
@@ -138,10 +139,11 @@ namespace ArrCompanion
     {
         private readonly IJsonSerializer _json;
 
-        public ArrCompanionService(IJsonSerializer json, ILogManager logManager)
+        public ArrCompanionService(IJsonSerializer json, ILogManager logManager, IProviderManager providerManager)
         {
             _json = json;
             Log.Initialize(logManager);
+            Posters.Initialize(providerManager);
         }
 
         private static PluginConfiguration Config => Plugin.Instance.Configuration;
@@ -279,7 +281,7 @@ namespace ArrCompanion
             var paths = await Posters.PathsAsync(titles, apiKey, _json, CancellationToken.None).ConfigureAwait(false);
             return new PostersResponse
             {
-                HasKey = apiKey.Length > 0,
+                HasKey = Posters.CanLookUp(apiKey),
                 Posters = paths.Select(p => new PosterItem { Key = p.Key, Url = Posters.Url(p.Value) }).ToList()
             };
         }

@@ -1,3 +1,8 @@
+using MediaBrowser.Controller.Entities.Movies;
+using MediaBrowser.Controller.Entities.TV;
+using MediaBrowser.Controller.Providers;
+using MediaBrowser.Model.Entities;
+using MediaBrowser.Model.Providers;
 using MediaBrowser.Model.Serialization;
 using System;
 using System.Collections.Generic;
@@ -13,6 +18,8 @@ namespace ArrCompanion
     /// Posters of the missing titles, from TMDb: the plugin finds each title's poster path (with
     /// Arr Companion's TMDb key, else Home Screen Companion's) and keeps it in posters.json; the
     /// browser loads the image itself from TMDb's image server, which needs no key.
+    /// Without a TMDb key, Emby's own metadata search (the one Identify uses, e.g. TheMovieDb)
+    /// is asked by the title's ids instead, and the image URL it gives is kept.
     /// </summary>
     internal static class Posters
     {
@@ -22,6 +29,12 @@ namespace ArrCompanion
         private static readonly TimeSpan RetryNotFound = TimeSpan.FromDays(7);
         private static readonly object Gate = new object();
         private static Dictionary<string, Entry>? _cache;
+        private static IProviderManager? _providers;
+
+        internal static void Initialize(IProviderManager providers) => _providers ??= providers;
+
+        /// <summary>Posters can be looked up: a TMDb key, or Emby's metadata search.</summary>
+        internal static bool CanLookUp(string apiKey) => apiKey.Length > 0 || _providers != null;
 
         public sealed class FileShape
         {
@@ -31,7 +44,7 @@ namespace ArrCompanion
         public sealed class Entry
         {
             public string Key { get; set; } = "";
-            public string Path { get; set; } = "";     // TMDb's poster_path; "" = TMDb has none
+            public string Path { get; set; } = "";     // TMDb's poster_path, or the image URL from Emby's search; "" = none
             public DateTime CheckedUtc { get; set; }
         }
 
@@ -50,7 +63,8 @@ namespace ArrCompanion
             return own.Length > 0 ? own : MissingList.Hsc().TmdbApiKey;
         }
 
-        internal static string Url(string path, string size = "w185") => path.Length == 0 ? "" : ImageBase + size + path;
+        internal static string Url(string path, string size = "w185") =>
+            path.Length == 0 ? "" : path.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? path : ImageBase + size + path;
 
         private static Dictionary<string, Entry> Cache(IJsonSerializer json)
         {
@@ -74,16 +88,20 @@ namespace ArrCompanion
             {
                 var cache = Cache(json);
                 foreach (var t in list)
-                    if (cache.TryGetValue(t.Key, out var e) && (Fresh(e) || apiKey.Length == 0)) result[t.Key] = e.Path;
+                    if (cache.TryGetValue(t.Key, out var e) && (Fresh(e) || !CanLookUp(apiKey))) result[t.Key] = e.Path;
                 toAsk = list.Where(t => !result.ContainsKey(t.Key)).ToList();
             }
-            if (toAsk.Count == 0 || apiKey.Length == 0) return result;
+            if (toAsk.Count == 0 || !CanLookUp(apiKey)) return result;
 
             var gate = new SemaphoreSlim(4);
             var found = await Task.WhenAll(toAsk.Select(async t =>
             {
                 await gate.WaitAsync(ct).ConfigureAwait(false);
-                try { return (t.Key, Path: await AskAsync(t, apiKey, json, ct).ConfigureAwait(false)); }
+                try
+                {
+                    var path = apiKey.Length > 0 ? await AskAsync(t, apiKey, json, ct).ConfigureAwait(false) : await AskEmbyAsync(t, ct).ConfigureAwait(false);
+                    return (t.Key, Path: path);
+                }
                 finally { gate.Release(); }
             })).ConfigureAwait(false);
 
@@ -131,6 +149,37 @@ namespace ArrCompanion
             catch (Exception ex)
             {
                 Log.Debug($"TMDb poster for {t.Name}: {ex.Message}");
+                return null;
+            }
+        }
+
+        // Emby's metadata search by the title's ids. The image URL; "" when none is found, null when it could not be asked.
+        private static async Task<string?> AskEmbyAsync(MissingList.Title t, CancellationToken ct)
+        {
+            var ids = new ProviderIdDictionary();
+            if (t.Imdb.Length > 0) ids[MetadataProviders.Imdb.ToString()] = t.Imdb;
+            if (t.Tmdb > 0) ids[MetadataProviders.Tmdb.ToString()] = t.Tmdb.ToString();
+            if (t.Type == MediaType.Show && t.Tvdb > 0) ids[MetadataProviders.Tvdb.ToString()] = t.Tvdb.ToString();
+            if (ids.Count == 0) return "";
+            try
+            {
+                IEnumerable<RemoteSearchResult> results = t.Type == MediaType.Show
+                    ? await _providers!.GetRemoteSearchResults<Series, SeriesInfo>(
+                        new RemoteSearchQuery<SeriesInfo> { SearchInfo = new SeriesInfo { ProviderIds = ids }, IncludeDisabledProviders = true }, ct).ConfigureAwait(false)
+                    : await _providers!.GetRemoteSearchResults<Movie, MovieInfo>(
+                        new RemoteSearchQuery<MovieInfo> { SearchInfo = new MovieInfo { ProviderIds = ids }, IncludeDisabledProviders = true }, ct).ConfigureAwait(false);
+                // A metadata plugin may answer with titles that are not the one asked for: none whose ids differ.
+                bool Agrees(RemoteSearchResult r) => r.ProviderIds == null || ids.All(a =>
+                    !r.ProviderIds.TryGetValue(a.Key, out var theirs) || string.IsNullOrWhiteSpace(theirs) || string.Equals(theirs.Trim(), a.Value, StringComparison.OrdinalIgnoreCase));
+                var url = (results ?? Enumerable.Empty<RemoteSearchResult>()).Where(Agrees).Select(r => r.ImageUrl).FirstOrDefault(u => !string.IsNullOrWhiteSpace(u)) ?? "";
+                // TheMovieDb gives the original size: the page needs far less.
+                const string original = ImageBase + "original/";
+                return url.StartsWith(original, StringComparison.OrdinalIgnoreCase) ? ImageBase + "w185/" + url.Substring(original.Length) : url;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                Log.Debug($"Emby's metadata search, poster for {t.Name}: {ex.Message}");
                 return null;
             }
         }
