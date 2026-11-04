@@ -48,9 +48,15 @@ namespace ArrCompanion
             public List<Row> Rows { get; set; } = new List<Row>();
             public List<string> Lists { get; set; } = new List<string>();
             public List<string> Errors { get; set; } = new List<string>();   // a server that could not be read
+            public bool Refreshing { get; set; }    // built from the last stored Sonarr / Radarr lists; newer ones are being read
         }
 
-        internal static async Task<Result> BuildAsync(PluginConfiguration config, IJsonSerializer json, CancellationToken ct)
+        /// <summary>
+        /// stored: label with the last Sonarr / Radarr lists the plugin kept (instant), and with
+        /// refresh, read them again in the background (Refreshing says so). Otherwise wait for
+        /// current lists, as an add and the rules do.
+        /// </summary>
+        internal static async Task<Result> BuildAsync(PluginConfiguration config, IJsonSerializer json, CancellationToken ct, bool stored = false, bool refresh = false)
         {
             var result = new Result { File = MissingList.Read(config, json) };
             var titles = result.File.Titles;
@@ -59,18 +65,20 @@ namespace ArrCompanion
                 .OrderBy(l => l, StringComparer.CurrentCultureIgnoreCase).ToList();
 
             var client = new ArrClient(json);
-            var holdings = new Dictionary<string, ArrClient.Holdings?>();
+            var reads = new List<(string Kind, ArrInstance Instance, Task<(ArrClient.Holdings? Holdings, string? Error, bool Stored)> Read)>();
             foreach (var kind in new[] { ArrKind.Radarr, ArrKind.Sonarr })
             {
                 var instance = config.InstanceFor(kind);
                 if (instance == null || titles.All(t => ArrKind.For(t.Type) != kind)) continue;
-                try { holdings[kind] = new ArrClient.Holdings(await client.LibraryAsync(instance, ct).ConfigureAwait(false)); }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-                catch (Exception ex)
-                {
-                    holdings[kind] = null;
-                    result.Errors.Add($"{instance.Label} could not be read: {ex.Message}");
-                }
+                reads.Add((kind, instance, HoldingsAsync(client, instance, stored, refresh, ct)));   // both servers at once
+            }
+            var holdings = new Dictionary<string, ArrClient.Holdings?>();
+            foreach (var r in reads)
+            {
+                var (held, error, fromStore) = await r.Read.ConfigureAwait(false);
+                holdings[r.Kind] = held;
+                if (error != null) result.Errors.Add(error);
+                if (fromStore && ArrClient.IsRefreshing(r.Instance)) result.Refreshing = true;
             }
 
             var ignored = new HashSet<string>(config.Ignored ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
@@ -99,6 +107,27 @@ namespace ArrCompanion
             }
             result.Rows = result.Rows.OrderBy(r => r.BestRank ?? int.MaxValue).ThenBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase).ToList();
             return result;
+        }
+
+        private static async Task<(ArrClient.Holdings? Holdings, string? Error, bool Stored)> HoldingsAsync(ArrClient client, ArrInstance instance, bool stored, bool refresh, CancellationToken ct)
+        {
+            if (stored)
+            {
+                var kept = client.Stored(instance);
+                if (kept != null)
+                {
+                    if (refresh) client.RefreshInBackground(instance);
+                    return (new ArrClient.Holdings(kept), null, true);
+                }
+            }
+            try { return (new ArrClient.Holdings(await client.LibraryAsync(instance, ct).ConfigureAwait(false)), null, false); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                // Not reachable now: the last list it gave still tells what it holds.
+                var kept = client.Stored(instance);
+                return (kept != null ? new ArrClient.Holdings(kept) : null, $"{instance.Label} could not be read: {ex.Message}", false);
+            }
         }
 
         internal static MissingList.Title ToTitle(Row r) => new MissingList.Title

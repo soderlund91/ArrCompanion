@@ -24,11 +24,16 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         posterAsked: {},   // key -> true while asked
         noTmdbKey: false,  // no way to look posters up: they are not asked for
         type: '',          // Movies / Shows chip: '' | 'movie' | 'show'
-        view: 'list'       // 'list' | 'posters'
+        showInArr: false,  // also the titles Sonarr / Radarr already have
+        hiddenView: false, // Show hidden: only the hidden titles
+        view: 'list',      // 'list' | 'posters'
+        loads: 0           // GET ArrCompanion/Missing asked so far; an older answer is dropped
     };
 
     function storedView() { try { return localStorage.getItem('arrCompanionView') || 'list'; } catch (e) { return 'list'; } }
     function storeView(v) { try { localStorage.setItem('arrCompanionView', v); } catch (e) { } }
+    function storedShowInArr() { try { return localStorage.getItem('arrCompanionShowInArr') === '1'; } catch (e) { return false; } }
+    function storeShowInArr(on) { try { localStorage.setItem('arrCompanionShowInArr', on ? '1' : '0'); } catch (e) { } }
 
     // ---- Helpers ----
 
@@ -139,20 +144,34 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
 
     // ---- Missing ----
 
-    function loadMissing(view) {
+    // The rows at once, labelled with the Sonarr / Radarr lists the plugin kept; refresh: those
+    // lists are read again meanwhile, and the rows are labelled again when they arrive.
+    function loadMissing(view, refresh) {
         var list = view.querySelector('#acMissingList');
+        var load = ++state.loads;
         if (!state.catalog) list.innerHTML = '<div class="ac-empty"><span class="ac-spin"></span></div>';
-        return api('ArrCompanion/Missing').then(function (res) {
+        function show(res) {
+            if (load !== state.loads) return false;
             state.catalog = res;
             var keys = {};
             (res.Rows || []).forEach(function (r) { keys[r.Key] = true; });
             Object.keys(state.selected).forEach(function (k) { if (!keys[k]) delete state.selected[k]; });
             fillListFilter(view);
             renderMissing(view);
-        }).catch(function (err) {
+            view.querySelector('#acRefresh').classList.toggle('ac-refreshing', !!res.Refreshing);
+            return true;
+        }
+        function failed(err) {
+            if (load !== state.loads) return;
+            view.querySelector('#acRefresh').classList.remove('ac-refreshing');
             view.querySelector('#acMissingBanner').innerHTML = '<div class="ac-banner error">The missing titles could not be read: ' + esc(err.message) + '</div>';
-            list.innerHTML = '';
-        });
+            if (!state.catalog) list.innerHTML = '';
+        }
+        return api('ArrCompanion/Missing?Stored=true&Refresh=' + (refresh ? 'true' : 'false')).then(function (res) {
+            if (!show(res) || !res.Refreshing) return;
+            // Waits for the lists being read, then labels the rows again.
+            return api('ArrCompanion/Missing').then(show, failed);
+        }, failed);
     }
 
     function fillListFilter(view) {
@@ -204,21 +223,20 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         return ranked[0] || places[0] || null;
     }
 
-    // The rows the filters let through; ignoreType: all but the Movies / Shows chip (for the chips' counts).
-    function visibleRows(view, ignoreType) {
+    // The rows the filters let through; ignoreType: all but the Movies / Shows chip (for the chips' counts);
+    // withInArr: as if In Sonarr / Radarr were on (for its count).
+    function visibleRows(view, ignoreType, withInArr) {
         var rows = (state.catalog && state.catalog.Rows) || [];
         var q = view.querySelector('#acSearch').value.trim().toLowerCase();
         var type = ignoreType ? '' : state.type;
         var list = view.querySelector('#acFilterList').value;
         var top = int(view.querySelector('#acFilterTop').value);
-        var status = view.querySelector('#acFilterStatus').value;
         var sort = view.querySelector('#acSort').value;
 
         var out = rows.filter(function (r) {
             if (q && (r.Title || '').toLowerCase().indexOf(q) < 0 && (r.Imdb || '').toLowerCase().indexOf(q) < 0) return false;
             if (type && r.Type !== type) return false;
-            if (status === 'missing' && r.Status !== 'missing' && r.Status !== 'noServer') return false;
-            if (status && status !== 'missing' && r.Status !== status) return false;
+            if (state.hiddenView ? r.Status !== 'ignored' : !isOpen(r) && !((state.showInArr || withInArr) && r.Status === 'inArr')) return false;
             var places = (r.Places || []).filter(function (p) { return !list || p.List === list; });
             if (list && !places.length) return false;
             if (top && !places.some(function (p) { return p.Rank != null && p.Rank <= top; })) return false;
@@ -296,6 +314,13 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         view.querySelector('#acTypeChips').innerHTML = chips.map(function (c) {
             return '<button type="button" class="ac-filter-chip' + (state.type === c[0] ? ' active' : '') + '" data-type="' + c[0] + '"><i class="md-icon">' + c[1] + '</i>' + c[2] + ' ' + c[3] + '</button>';
         }).join('');
+        // Titles Sonarr / Radarr already have (not downloaded yet, or not in the library): shown too when on.
+        var inArr = visibleRows(view, false, true).filter(function (r) { return r.Status === 'inArr'; }).length;
+        var toggle = view.querySelector('#acInArr');
+        toggle.style.display = state.hiddenView ? 'none' : '';
+        toggle.classList.toggle('active', state.showInArr);
+        toggle.setAttribute('aria-pressed', state.showInArr ? 'true' : 'false');
+        toggle.innerHTML = '<i class="md-icon">' + (state.showInArr ? 'check_box' : 'check_box_outline_blank') + '</i>In Sonarr / Radarr ' + inArr;
         view.querySelectorAll('#acView button').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-view') === state.view); });
     }
 
@@ -339,7 +364,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         var k = kindOf(row.Type);
         if (row.Status === 'ignored') return '<span class="ac-pill neutral">Hidden</span>';
         if (row.Status === 'noServer') return '<span class="ac-pill warn">No ' + k.label + ' set up</span>';
-        if (row.AddedBefore) return '<span class="ac-pill neutral" title="Added once by Arr Companion and since removed. Rules leave it alone.">Added before</span>';
+        if (row.AddedBefore && row.Status !== 'inArr') return '<span class="ac-pill neutral" title="Added once by Arr Companion and since removed. Rules leave it alone.">Added before</span>';
         return '';
     }
 
@@ -414,7 +439,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         var rowByKey = {};
         ((state.catalog && state.catalog.Rows) || []).forEach(function (r) { rowByKey[r.Key] = r; });
         var addable = keys.filter(function (k) { return rowByKey[k] && isOpen(rowByKey[k]); });
-        var viewingHidden = view.querySelector('#acFilterStatus').value === 'ignored';
+        var viewingHidden = state.hiddenView;
         var hideable = viewingHidden ? keys.filter(function (k) { return rowByKey[k] && rowByKey[k].Status === 'ignored'; }) : addable;
         view.querySelector('#acCount').textContent = rows.length + ' shown' + (keys.length ? ' · ' + keys.length + ' selected' : '');
         var all = view.querySelector('#acSelectAll');
@@ -835,7 +860,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             toast('Settings saved');
             state.posters = {};
             state.noTmdbKey = false;
-            return loadMissing(view);
+            return loadMissing(view, true);
         }).catch(function (err) { toast('Could not save: ' + err.message); })
         .then(function () { btn.disabled = false; });
     }
@@ -849,13 +874,18 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         });
 
         // Missing
-        ['#acSearch', '#acFilterList', '#acFilterTop', '#acFilterStatus', '#acSort'].forEach(function (sel) {
+        ['#acSearch', '#acFilterList', '#acFilterTop', '#acSort'].forEach(function (sel) {
             view.querySelector(sel).addEventListener(sel === '#acSearch' ? 'input' : 'change', function () { renderMissing(view); });
         });
         view.querySelector('#acTypeChips').addEventListener('click', function (e) {
             var chip = e.target.closest('[data-type]');
             if (!chip) return;
             state.type = chip.getAttribute('data-type');
+            renderMissing(view);
+        });
+        view.querySelector('#acInArr').addEventListener('click', function () {
+            state.showInArr = !state.showInArr;
+            storeShowInArr(state.showInArr);
             renderMissing(view);
         });
         view.querySelector('#acView').addEventListener('click', function (e) {
@@ -865,7 +895,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             storeView(state.view);
             renderMissing(view);
         });
-        view.querySelector('#acRefresh').addEventListener('click', function () { loadMissing(view); });
+        view.querySelector('#acRefresh').addEventListener('click', function () { loadMissing(view, true); });
         function pick(key, on) {
             if (on) state.selected[key] = true; else delete state.selected[key];
             view.querySelectorAll('#acMissingList [data-key].selectable').forEach(function (row) {
@@ -906,12 +936,11 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         view.querySelector('#acIgnoreSelected').addEventListener('click', function () {
             var rowByKey = {};
             ((state.catalog && state.catalog.Rows) || []).forEach(function (r) { rowByKey[r.Key] = r; });
-            var unhide = view.querySelector('#acFilterStatus').value === 'ignored';
+            var unhide = state.hiddenView;
             ignore(view, selectedKeys().filter(function (k) { return rowByKey[k] && (unhide ? rowByKey[k].Status === 'ignored' : isOpen(rowByKey[k])); }), !unhide);
         });
         view.querySelector('#acShowHidden').addEventListener('click', function () {
-            var status = view.querySelector('#acFilterStatus');
-            status.value = status.value === 'ignored' ? 'missing' : 'ignored';
+            state.hiddenView = !state.hiddenView;
             state.selected = {};
             renderMissing(view);
         });
@@ -980,12 +1009,13 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         view.addEventListener('viewshow', function () {
             applyTheme(view);
             state.view = storedView() === 'posters' ? 'posters' : 'list';
+            state.showInArr = storedShowInArr();
             if (!view.dataset.acInit) {
                 view.dataset.acInit = '1';
                 bind(view);
             }
             loadConfig().then(function () {
-                return loadMissing(view);
+                return loadMissing(view, true);
             }).then(function () {
                 var active = view.querySelector('.ac-tab.active');
                 if (active && active.getAttribute('data-tab') !== 'missing') showTab(view, active.getAttribute('data-tab'));

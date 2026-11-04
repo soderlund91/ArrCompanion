@@ -51,7 +51,12 @@ namespace ArrCompanion
 
     [Route("/ArrCompanion/Missing", "GET")]
     [Authenticated(Roles = "Admin")]
-    public class MissingRequest : IReturn<Catalog.Result> { }
+    public class MissingRequest : IReturn<Catalog.Result>
+    {
+        // Stored: answer at once with the last Sonarr / Radarr lists kept; Refresh: and read them again meanwhile.
+        public bool Stored { get; set; }
+        public bool Refresh { get; set; }
+    }
 
     [Route("/ArrCompanion/Add", "POST")]
     [Authenticated(Roles = "Admin")]
@@ -187,7 +192,7 @@ namespace ArrCompanion
         }
 
         public async Task<object> Get(MissingRequest request) =>
-            await Catalog.BuildAsync(Config, _json, CancellationToken.None).ConfigureAwait(false);
+            await Catalog.BuildAsync(Config, _json, CancellationToken.None, request.Stored, request.Refresh).ConfigureAwait(false);
 
         public async Task<object> Post(AddRequest request)
         {

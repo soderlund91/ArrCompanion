@@ -165,23 +165,164 @@ namespace ArrCompanion
 
         // ---- What it holds ----
 
-        internal async Task<List<LibraryEntry>> LibraryAsync(ArrInstance i, CancellationToken ct)
+        // One download of a server's list at a time: the page's first answer starts it, its
+        // second answer (and an add or a rule meanwhile) waits for that same download.
+        private static readonly Dictionary<string, Task<List<LibraryEntry>>> InFlight = new Dictionary<string, Task<List<LibraryEntry>>>();
+        // Raised by an add, so a download that started before it does not overwrite it.
+        private static readonly Dictionary<string, int> Generation = new Dictionary<string, int>();
+        private static Dictionary<string, StoredList>? _stored;
+
+        public sealed class StoreShape
         {
-            var cacheKey = i.Kind + "|" + i.BaseUrl + "|" + i.Key;
+            public List<StoredList> Servers { get; set; } = new List<StoredList>();
+        }
+
+        public sealed class StoredList
+        {
+            public string Key { get; set; } = "";   // instance id | kind | URL (never the API key)
+            public DateTime AtUtc { get; set; }
+            public List<LibraryEntry> Entries { get; set; } = new List<LibraryEntry>();
+        }
+
+        private static string CacheKey(ArrInstance i) => i.Kind + "|" + i.BaseUrl + "|" + i.Key;
+        private static string StoreKey(ArrInstance i) => i.Id + "|" + i.Kind + "|" + i.BaseUrl;
+        private static string StorePath => System.IO.Path.Combine(Plugin.Instance.DataFolderPath, "arr_library.json");
+
+        // Only what tells which titles a server holds and how far along they are.
+        private static LibraryEntry Slim(LibraryEntry e) => new LibraryEntry
+        {
+            id = e.id, tvdbId = e.tvdbId, tmdbId = e.tmdbId, imdbId = e.imdbId,
+            monitored = e.monitored, hasFile = e.hasFile, statistics = e.statistics
+        };
+
+        internal Task<List<LibraryEntry>> LibraryAsync(ArrInstance i, CancellationToken ct) => LibraryAsync(i, false, ct);
+
+        /// <summary>The server's list: the one being downloaded, else the one from the last 2 minutes, else a new download (force: always a new one unless one is under way).</summary>
+        internal async Task<List<LibraryEntry>> LibraryAsync(ArrInstance i, bool force, CancellationToken ct)
+        {
+            var key = CacheKey(i);
+            Task<List<LibraryEntry>>? task;
             lock (CacheLock)
             {
-                if (LibraryCache.TryGetValue(cacheKey, out var hit) && DateTime.UtcNow - hit.At < CacheFor)
-                    return hit.List;
+                if (!InFlight.TryGetValue(key, out task))
+                {
+                    if (!force && LibraryCache.TryGetValue(key, out var hit) && DateTime.UtcNow - hit.At < CacheFor)
+                        return hit.List;
+                    Generation.TryGetValue(key, out var gen);
+                    task = Task.Run(() => FetchAsync(i, key, gen));
+                    InFlight[key] = task;
+                }
             }
-            var list = await Get<List<LibraryEntry>>(i, i.Kind == ArrKind.Sonarr ? "/api/v3/series" : "/api/v3/movie", ct).ConfigureAwait(false)
-                ?? new List<LibraryEntry>();
-            lock (CacheLock) LibraryCache[cacheKey] = (DateTime.UtcNow, list);
-            return list;
+            if (ct.CanBeCanceled) await Task.WhenAny(task, Task.Delay(Timeout.Infinite, ct)).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            return await task.ConfigureAwait(false);
+        }
+
+        private async Task<List<LibraryEntry>> FetchAsync(ArrInstance i, string key, int gen)
+        {
+            try
+            {
+                var list = (await Get<List<LibraryEntry>>(i, i.Kind == ArrKind.Sonarr ? "/api/v3/series" : "/api/v3/movie", CancellationToken.None).ConfigureAwait(false)
+                    ?? new List<LibraryEntry>()).Select(Slim).ToList();
+                lock (CacheLock)
+                {
+                    Generation.TryGetValue(key, out var now);
+                    if (now != gen) return list;   // an add came in meanwhile: its own record stays
+                    LibraryCache[key] = (DateTime.UtcNow, list);
+                    Store(i, list);
+                }
+                return list;
+            }
+            finally
+            {
+                lock (CacheLock)
+                {
+                    Generation.TryGetValue(key, out var now);
+                    if (now == gen) InFlight.Remove(key);
+                }
+            }
+        }
+
+        /// <summary>Downloads the server's list again, without waiting for it.</summary>
+        internal void RefreshInBackground(ArrInstance i)
+        {
+            LibraryAsync(i, true, CancellationToken.None).ContinueWith(t =>
+                Log.Warn($"{i.Label} could not be read: {t.Exception?.GetBaseException().Message}"), TaskContinuationOptions.OnlyOnFaulted);
+        }
+
+        internal static bool IsRefreshing(ArrInstance i)
+        {
+            lock (CacheLock) return InFlight.ContainsKey(CacheKey(i));
+        }
+
+        /// <summary>The last list the server gave, however old (kept on disk across restarts); null if it was never read.</summary>
+        internal List<LibraryEntry>? Stored(ArrInstance i)
+        {
+            lock (CacheLock)
+            {
+                if (LibraryCache.TryGetValue(CacheKey(i), out var hit)) return hit.List;
+                return StoredLists().TryGetValue(StoreKey(i), out var s) ? s.Entries : null;
+            }
+        }
+
+        /// <summary>After an add: the title counts as held at once, until the server's list is read again.</summary>
+        internal void Remember(ArrInstance i, LibraryEntry added, MissingList.Title t, bool monitored)
+        {
+            var entry = Slim(added);
+            if (string.IsNullOrEmpty(entry.imdbId) && t.Imdb.Length > 0) entry.imdbId = t.Imdb;
+            if (entry.tmdbId == 0) entry.tmdbId = t.Tmdb;
+            if (entry.tvdbId == 0) entry.tvdbId = t.Tvdb;
+            entry.monitored = monitored;
+            entry.hasFile = false;
+            entry.statistics = null;
+            var key = CacheKey(i);
+            lock (CacheLock)
+            {
+                var list = (Stored(i) ?? new List<LibraryEntry>()).ToList();
+                list.Add(entry);
+                // Stale for an add or a rule (they read the server again), current for the page.
+                LibraryCache[key] = (DateTime.MinValue, list);
+                Generation[key] = (Generation.TryGetValue(key, out var g) ? g : 0) + 1;
+                InFlight.Remove(key);
+                Store(i, list);
+            }
         }
 
         internal static void Forget(ArrInstance i)
         {
-            lock (CacheLock) LibraryCache.Remove(i.Kind + "|" + i.BaseUrl + "|" + i.Key);
+            var key = CacheKey(i);
+            lock (CacheLock) if (LibraryCache.TryGetValue(key, out var hit)) LibraryCache[key] = (DateTime.MinValue, hit.List);
+        }
+
+        // Called under CacheLock.
+        private Dictionary<string, StoredList> StoredLists()
+        {
+            if (_stored != null) return _stored;
+            _stored = new Dictionary<string, StoredList>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                if (System.IO.File.Exists(StorePath))
+                    foreach (var s in _json.DeserializeFromFile<StoreShape>(StorePath)?.Servers ?? new List<StoredList>())
+                        if (!string.IsNullOrEmpty(s.Key)) _stored[s.Key] = s;
+            }
+            catch (Exception ex) { Log.Warn("The stored Sonarr / Radarr lists could not be read: " + ex.Message); }
+            return _stored;
+        }
+
+        // Called under CacheLock.
+        private void Store(ArrInstance i, List<LibraryEntry> list)
+        {
+            var all = StoredLists();
+            all[StoreKey(i)] = new StoredList { Key = StoreKey(i), AtUtc = DateTime.UtcNow, Entries = list };
+            try
+            {
+                System.IO.Directory.CreateDirectory(Plugin.Instance.DataFolderPath);
+                var tmp = StorePath + ".tmp";
+                _json.SerializeToFile(new StoreShape { Servers = all.Values.ToList() }, tmp);
+                if (System.IO.File.Exists(StorePath)) System.IO.File.Delete(StorePath);
+                System.IO.File.Move(tmp, StorePath);
+            }
+            catch (Exception ex) { Log.Warn("The Sonarr / Radarr lists could not be stored: " + ex.Message); }
         }
 
         /// <summary>The ids a server holds, to tell which titles it already has (and how far along they are).</summary>
@@ -235,7 +376,7 @@ namespace ArrCompanion
                 var result = i.Kind == ArrKind.Sonarr
                     ? await AddShowAsync(i, t, o, ct).ConfigureAwait(false)
                     : await AddMovieAsync(i, t, o, ct).ConfigureAwait(false);
-                if (result.Success || result.AlreadyIn) Forget(i);
+                if (result.Success || result.AlreadyIn) Forget(i);   // an add or a rule reads the server again
                 return result;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
@@ -293,8 +434,7 @@ namespace ArrCompanion
                 + "\"addOptions\":{\"monitor\":" + Q(o.SeriesMonitor) + ",\"searchForMissingEpisodes\":" + B(o.Search) + ",\"searchForCutoffUnmetEpisodes\":false}"
                 + "}";
             var (status, resBody) = await Send(HttpMethod.Post, i.BaseUrl, i.Key, "/api/v3/series", body, ct).ConfigureAwait(false);
-            if (status >= 200 && status <= 299) return new AddResult { Success = true, Message = $"Added to {i.Label}." };
-            return Failed(i, resBody, status, "SeriesExistsValidator");
+            return Answered(i, series, t, o, resBody, status, "SeriesExistsValidator");
         }
 
         private async Task<LibraryEntry?> LookupMovieAsync(ArrInstance i, MissingList.Title t, CancellationToken ct)
@@ -338,8 +478,16 @@ namespace ArrCompanion
                 + "\"addOptions\":{\"searchForMovie\":" + B(o.Search) + "}"
                 + "}";
             var (status, resBody) = await Send(HttpMethod.Post, i.BaseUrl, i.Key, "/api/v3/movie", body, ct).ConfigureAwait(false);
-            if (status >= 200 && status <= 299) return new AddResult { Success = true, Message = $"Added to {i.Label}." };
-            return Failed(i, resBody, status, "MovieExistsValidator");
+            return Answered(i, movie, t, o, resBody, status, "MovieExistsValidator");
+        }
+
+        private AddResult Answered(ArrInstance i, LibraryEntry found, MissingList.Title t, AddOptions o, string body, int status, string existsCode)
+        {
+            var result = status >= 200 && status <= 299
+                ? new AddResult { Success = true, Message = $"Added to {i.Label}." }
+                : Failed(i, body, status, existsCode);
+            if (result.Success || result.AlreadyIn) Remember(i, found, t, o.Monitored);
+            return result;
         }
 
         // Sonarr / Radarr answer a failed add with a list of validation errors.
