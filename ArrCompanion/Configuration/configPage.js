@@ -1015,6 +1015,17 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         });
         view.querySelector('#acRunRules').addEventListener('click', function () { runRules(view); });
 
+        // Help
+        var help = view.querySelector('#acHelpOverlay');
+        function closeHelp() { help.classList.remove('ac-visible'); }
+        view.querySelector('#acOpenHelp').addEventListener('click', function () { help.classList.add('ac-visible'); });
+        help.addEventListener('click', function (e) {
+            if (e.target === help || e.target.closest('[data-help-close]')) closeHelp();
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && help.classList.contains('ac-visible')) closeHelp();
+        });
+
         // History
         view.querySelector('#acHistoryRefresh').addEventListener('click', function () { loadHistory(view); });
 
