@@ -187,6 +187,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             Object.keys(state.selected).forEach(function (k) { if (!keys[k]) delete state.selected[k]; });
             fillListFilter(view);
             renderMissing(view);
+            fileFolds(view);
             view.querySelector('#acRefresh').classList.toggle('ac-refreshing', !!res.Refreshing);
             return true;
         }
@@ -840,15 +841,23 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             + '</div>';
     }
 
+    // The missing titles file's panels: open when the file is not there (known once the list is read).
+    function fileFolds(view) {
+        var noFile = !!(state.catalog && state.catalog.File && !state.catalog.File.Found);
+        ['other', 'file'].forEach(function (key) {
+            setFold(view.querySelector('[data-fold="' + key + '"]'), foldOpen(key, noFile));
+        });
+    }
+
     function renderServers(view) {
         if (!state.config) return;
         // Sonarr first, as the panel's label has them.
         view.querySelector('#acServers').innerHTML = [KINDS[1], KINDS[0]].map(serverPanel).join('');
         // Servers is open; the file's panels open when the file is not there.
-        var noFile = !!(state.catalog && state.catalog.File && !state.catalog.File.Found);
-        [['servers', true], ['other', noFile], ['file', noFile], ['posters', false]].forEach(function (f) {
+        [['servers', true], ['posters', false]].forEach(function (f) {
             setFold(view.querySelector('[data-fold="' + f[0] + '"]'), foldOpen(f[0], f[1]));
         });
+        fileFolds(view);
         view.querySelector('#acListPath').value = state.config.MissingListPath || '';
         view.querySelector('#acTmdbKey').value = state.config.TmdbApiKey || '';
         var file = state.catalog && state.catalog.File;
