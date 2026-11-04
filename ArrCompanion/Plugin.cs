@@ -34,6 +34,9 @@ namespace ArrCompanion
                 // The ignored titles are the Missing tab's own record (Ignore buttons, saved at once);
                 // a settings page loaded before them would otherwise undo them.
                 incoming.Ignored = Configuration?.Ignored ?? new List<string>();
+                // The same for the root folder each server's Add dialog last used.
+                foreach (var i in incoming.Instances ?? new List<ArrInstance>())
+                    i.LastRootFolderPath = Configuration?.Instances?.FirstOrDefault(c => c.Id == i.Id)?.LastRootFolderPath ?? "";
                 incoming.Normalize();
             }
             base.UpdateConfiguration(configuration);

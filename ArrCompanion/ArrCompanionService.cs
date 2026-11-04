@@ -205,6 +205,7 @@ namespace ArrCompanion
             var catalog = await Catalog.BuildAsync(config, _json, CancellationToken.None).ConfigureAwait(false);
             var client = new ArrClient(_json);
             var entries = new List<History.Entry>();
+            var remembered = false;
             foreach (var row in catalog.Rows.Where(r => keys.Contains(r.Key)))
             {
                 var kind = ArrKind.For(row.Type);
@@ -240,7 +241,15 @@ namespace ArrCompanion
                     Success = res.Success, AlreadyIn = res.AlreadyIn, Message = res.Message
                 });
                 if (res.Success) Log.Info($"Added {row.Title} to {instance.Label}");
+                // The root folder picked is where the Add dialog starts next time.
+                var picked = (choice?.RootFolderPath ?? "").Trim();
+                if (res.Success && picked.Length > 0 && picked != (instance.LastRootFolderPath ?? ""))
+                {
+                    instance.LastRootFolderPath = picked;
+                    remembered = true;
+                }
             }
+            if (remembered) Plugin.Instance.SaveConfiguration();
             foreach (var key in keys.Where(k => response.Results.All(r => !string.Equals(r.Key, k, StringComparison.OrdinalIgnoreCase))))
                 response.Results.Add(new AddItemResult { Key = key, Message = "No longer on the missing list." });
             if (entries.Count > 0) History.Add(entries, _json);

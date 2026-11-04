@@ -83,6 +83,10 @@ namespace ArrCompanion
         public string SeriesMonitor { get; set; } = "all";               // Sonarr: all | future | missing | existing | firstSeason | latestSeason | pilot | none
         public bool SeasonFolder { get; set; } = true;                   // Sonarr
 
+        // The root folder last picked in the Add dialog: the dialog starts on it next time. Kept
+        // by the server (an add sets it, a settings save keeps it); rules never use it.
+        public string LastRootFolderPath { get; set; } = "";
+
         internal string BaseUrl => (Url ?? "").Trim().TrimEnd('/');
         internal string Key => (ApiKey ?? "").Trim();
         internal bool IsSetUp => BaseUrl.Length > 0 && Key.Length > 0;

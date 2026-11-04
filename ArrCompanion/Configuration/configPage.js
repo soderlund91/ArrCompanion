@@ -591,7 +591,10 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
                 if (!res || !res.Success) {
                     box.insertAdjacentHTML('beforeend', '<div class="ac-banner error">' + esc((res && res.Message) || 'Could not read the options.') + '</div>');
                 }
-                box.querySelector('[data-f="RootFolderPath"]').innerHTML = folderOptions(res, instance.RootFolderPath || '');
+                // The root folder last picked here for this server, else the one under Settings.
+                var last = instance.LastRootFolderPath || '';
+                var known = ((res && res.RootFolders) || []).some(function (f) { return f.Path === last; });
+                box.querySelector('[data-f="RootFolderPath"]').innerHTML = folderOptions(res, known ? last : instance.RootFolderPath || '');
                 box.querySelector('[data-f="QualityProfileId"]').innerHTML = profileOptions(res, instance.QualityProfileId || 0);
             }).catch(function (err) {
                 box.insertAdjacentHTML('beforeend', '<div class="ac-banner error">' + esc(err.message) + '</div>');
@@ -632,6 +635,13 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
                         + (x.Success ? '' : ' <span class="ac-muted">' + esc(x.Message) + '</span>') + '</div>';
                 }).join('');
                 results.forEach(function (x) { if (x.Success || x.AlreadyIn) delete state.selected[x.Key]; });
+                // The server keeps the root folder an add used; the next dialog starts on it.
+                kinds.forEach(function (k) {
+                    var choice = body[k.kind === 'radarr' ? 'Radarr' : 'Sonarr'];
+                    var added = results.some(function (x) { return x.Success && rowByKey[x.Key] && rowByKey[x.Key].Type === k.type; });
+                    var instance = choice && instances().filter(function (i) { return i.Id === choice.InstanceId; })[0];
+                    if (added && instance && choice.RootFolderPath) instance.LastRootFolderPath = choice.RootFolderPath;
+                });
                 go.style.display = 'none';
                 backdrop.querySelector('.ac-cancel').textContent = 'Close';
             }).catch(function (err) {
