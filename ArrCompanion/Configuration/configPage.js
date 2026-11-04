@@ -27,7 +27,8 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         showInArr: false,  // also the titles Sonarr / Radarr already have
         hiddenView: false, // Show hidden: only the hidden titles
         view: 'list',      // 'list' | 'posters'
-        loads: 0           // GET ArrCompanion/Missing asked so far; an older answer is dropped
+        loads: 0,          // GET ArrCompanion/Missing asked so far; an older answer is dropped
+        folds: {}          // Settings panels the user opened or closed: data-fold -> open
     };
 
     function storedView() { try { return localStorage.getItem('arrCompanionView') || 'list'; } catch (e) { return 'list'; } }
@@ -773,38 +774,51 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
 
     // ---- Settings ----
 
+    // Emby's own checkbox as a Home Screen Companion settings row.
+    function settingsCheckbox(attrs, checked, text) {
+        return '<div class="checkboxContainer"><label><input type="checkbox" is="emby-checkbox" ' + attrs + (checked ? ' checked' : '') + ' /><span>' + text + '</span></label></div>';
+    }
+
+    // One server, folded inside the Sonarr & Radarr panel (Home Screen Companion's provider panels).
     function serverPanel(k) {
         var i = instanceOf(k.kind) || { Kind: k.kind, Monitored: true, SearchOnAdd: true, SeasonFolder: true, MinimumAvailability: 'released', SeriesMonitor: 'all' };
+        var open = !!state.folds['server-' + k.kind];
+        function select(label, name, html) {
+            return '<div class="inputContainer"><label class="selectLabel">' + label + '</label><select is="emby-select" data-s="' + name + '" style="width:100%;">' + html + '</select></div>';
+        }
         var extra = k.kind === 'radarr'
-            ? '<label class="ac-field"><span>Minimum availability</span><select class="ac-select" data-s="MinimumAvailability">'
-                + MIN_AVAILABILITY.map(function (o) { return option(o[0], o[1], o[0] === (i.MinimumAvailability || 'released')); }).join('') + '</select></label>'
-            : '<label class="ac-field"><span>Monitor</span><select class="ac-select" data-s="SeriesMonitor">'
-                + SERIES_MONITOR.map(function (o) { return option(o[0], o[1], o[0] === (i.SeriesMonitor || 'all')); }).join('') + '</select></label>';
-        return '<div class="ac-panel" data-server="' + k.kind + '">'
-            + '<div class="ac-panel-title"><i class="md-icon">' + (k.kind === 'radarr' ? 'movie' : 'tv') + '</i>' + k.label + '</div>'
-            + '<div class="ac-grid">'
-            + '<label class="ac-field"><span>URL</span><input type="text" class="ac-input" data-s="Url" placeholder="http://localhost:' + k.port + '" value="' + esc(i.Url || '') + '" /></label>'
-            + '<div class="ac-field"><span>API key</span><input type="text" class="ac-input ac-key" data-s="ApiKey" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore value="' + esc(i.ApiKey || '') + '" />'
-            + '<label class="ac-show-key"><input type="checkbox" data-show-key /> Show</label></div>'
+            ? select('Minimum availability', 'MinimumAvailability', MIN_AVAILABILITY.map(function (o) { return option(o[0], o[1], o[0] === (i.MinimumAvailability || 'released')); }).join(''))
+            : select('Monitor', 'SeriesMonitor', SERIES_MONITOR.map(function (o) { return option(o[0], o[1], o[0] === (i.SeriesMonitor || 'all')); }).join(''));
+        return '<div class="ac-section" data-server="' + k.kind + '">'
+            + '<div class="ac-section-header" data-fold="server-' + k.kind + '">'
+            + '<i class="md-icon ac-section-icon">cloud_download</i>'
+            + '<span class="ac-section-title">' + k.label + '</span>'
+            + '<i class="md-icon ac-chevron"' + (open ? ' style="transform: rotate(180deg);"' : '') + '>expand_more</i>'
             + '</div>'
-            + '<div class="ac-row"><button type="button" class="ac-btn small" data-server-action="test"><i class="md-icon">wifi_tethering</i>Test connection</button><span class="ac-muted" data-test-result></span></div>'
-            + '<div class="ac-hint">The API key is under Settings › General in ' + k.label + '. It stays on the Emby server; the browser never talks to ' + k.label + '.</div>'
-            + '<div class="ac-eyebrow">Defaults for new ' + (k.type === 'show' ? 'shows' : 'movies') + ' (rules always use these)</div>'
-            + '<div class="ac-grid">'
-            + '<label class="ac-field"><span>Root folder</span><select class="ac-select" data-s="RootFolderPath">' + folderOptions(null, i.RootFolderPath || '') + '</select></label>'
-            + '<label class="ac-field"><span>Quality profile</span><select class="ac-select" data-s="QualityProfileId">' + profileOptions(null, i.QualityProfileId || 0) + '</select></label>'
+            + '<div class="ac-section-body" style="display:' + (open ? 'block' : 'none') + ';">'
+            + '<div class="inputContainer"><input is="emby-input" type="text" data-s="Url" label="' + k.label + ' Server URL" placeholder="http://localhost:' + k.port + '" autocomplete="off" spellcheck="false" value="' + esc(i.Url || '') + '" /></div>'
+            + '<div class="inputContainer"><input is="emby-input" type="text" class="ac-key" data-s="ApiKey" label="' + k.label + ' API Key" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore value="' + esc(i.ApiKey || '') + '" />'
+            + '<label class="ac-show-key"><input type="checkbox" data-show-key /> Show</label>'
+            + '<div class="fieldDescription">The API key is under Settings › General in ' + k.label + '. It stays on the Emby server; the browser never talks to ' + k.label + '.</div></div>'
+            + '<div class="ac-row"><button type="button" is="emby-button" class="raised ac-btn-neutral" data-server-action="test"><i class="md-icon" style="margin-right:5px;">wifi_tethering</i><span>Test Connection</span></button><span class="ac-muted" data-test-result></span></div>'
+            + '<div class="ac-eyebrow" style="margin: 24px 0 8px;">Defaults for new ' + (k.type === 'show' ? 'shows' : 'movies') + ' (rules always use these)</div>'
+            + select('Root folder', 'RootFolderPath', folderOptions(null, i.RootFolderPath || ''))
+            + select('Quality profile', 'QualityProfileId', profileOptions(null, i.QualityProfileId || 0))
             + extra
+            + '<div style="margin-top: 15px;">'
+            + settingsCheckbox('data-s="Monitored"', i.Monitored !== false, 'Monitored')
+            + settingsCheckbox('data-s="SearchOnAdd"', i.SearchOnAdd !== false, 'Search when added')
+            + (k.kind === 'sonarr' ? settingsCheckbox('data-s="SeasonFolder"', i.SeasonFolder !== false, 'Season folders') : '')
             + '</div>'
-            + checkbox('data-s="Monitored"', i.Monitored !== false, 'Monitored')
-            + checkbox('data-s="SearchOnAdd"', i.SearchOnAdd !== false, 'Search when added')
-            + (k.kind === 'sonarr' ? checkbox('data-s="SeasonFolder"', i.SeasonFolder !== false, 'Season folders') : '')
             + '<div class="ac-banner error" data-options-error style="display:none;"></div>'
+            + '</div>'
             + '</div>';
     }
 
     function renderServers(view) {
         if (!state.config) return;
-        view.querySelector('#acServers').innerHTML = KINDS.map(serverPanel).join('');
+        // Sonarr first, as the panel's title has them.
+        view.querySelector('#acServers').innerHTML = [KINDS[1], KINDS[0]].map(serverPanel).join('');
         view.querySelector('#acListPath').value = state.config.MissingListPath || '';
         view.querySelector('#acTmdbKey').value = state.config.TmdbApiKey || '';
         var file = state.catalog && state.catalog.File;
@@ -1037,9 +1051,19 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             testServer(view, KINDS.filter(function (k) { return k.kind === kind; })[0]);
         });
         view.querySelector('#acSaveSettings').addEventListener('click', function () { saveSettings(view); });
+        // Settings panels fold open and closed (Home Screen Companion's settings-panel-toggle).
+        view.querySelector('[data-tab-content="settings"]').addEventListener('click', function (e) {
+            var header = e.target.closest('[data-fold]');
+            if (!header) return;
+            var body = header.nextElementSibling, chevron = header.querySelector('.ac-chevron');
+            var open = body.style.display === 'none';
+            body.style.display = open ? 'block' : 'none';
+            if (chevron) chevron.style.transform = open ? 'rotate(180deg)' : '';
+            state.folds[header.getAttribute('data-fold')] = open;
+        });
         view.querySelector('[data-tab-content="settings"]').addEventListener('change', function (e) {
             if (!e.target.hasAttribute('data-show-key')) return;
-            var input = e.target.closest('.ac-field').querySelector('.ac-key');
+            var input = e.target.closest('.inputContainer').querySelector('.ac-key');
             if (input) input.classList.toggle('shown', e.target.checked);
         });
     }
