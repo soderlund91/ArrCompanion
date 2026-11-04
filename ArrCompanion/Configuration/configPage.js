@@ -103,6 +103,34 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         var m = (bg || '').match(/\d+/g);
         theme = m && (parseInt(m[0]) * 0.299 + parseInt(m[1]) * 0.587 + parseInt(m[2]) * 0.114) >= 128 ? 'light' : 'dark';
         view.setAttribute('data-ac-theme', theme);
+        // The footer bar starts beside Emby's drawer when it is docked.
+        var drawer = document.querySelector('.mainDrawer');
+        var drawerRight = drawer ? drawer.getBoundingClientRect().right : 0;
+        view.style.setProperty('--ac-footer-left', (drawerRight > 0 && drawerRight < window.innerWidth * 0.5 ? drawerRight : 0) + 'px');
+    }
+
+    // Footer: the installed version, and a newer release on GitHub (nothing shown when GitHub can't be read).
+    function loadFooter(view) {
+        window.ApiClient.getInstalledPlugins().then(function (plugins) {
+            var me = (plugins || []).filter(function (p) { return (p.Id || '').toLowerCase() === pluginId; })[0];
+            var ver = (me && me.Version) || '';
+            if (!ver) return;
+            view.querySelector('#acFooterVersion').innerHTML = '<a href="https://github.com/soderlund91/ArrCompanion/releases/tag/v' + esc(ver) + '" target="_blank" style="color:inherit;text-decoration:none;">v' + esc(ver) + '</a>';
+            fetch('https://api.github.com/repos/soderlund91/ArrCompanion/releases/latest')
+                .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
+                .then(function (release) {
+                    var latest = (release.tag_name || '').replace(/^v/i, '');
+                    if (!latest) return;
+                    var a = latest.split('.').map(Number), b = ver.split('.').map(Number), newer = false;
+                    for (var i = 0; i < Math.max(a.length, b.length); i++) {
+                        if ((a[i] || 0) > (b[i] || 0)) { newer = true; break; }
+                        if ((a[i] || 0) < (b[i] || 0)) break;
+                    }
+                    if (!newer) return;
+                    view.querySelector('#acFooterUpdateSep').style.display = '';
+                    view.querySelector('#acFooterUpdateInfo').innerHTML = '<a class="footer-update-link" href="' + esc(release.html_url || 'https://github.com/soderlund91/ArrCompanion/releases') + '" target="_blank">Update available: v' + esc(latest) + '</a>';
+                }).catch(function () { });
+        }).catch(function () { });
     }
 
     // ---- Settings (the saved ones) ----
@@ -1008,11 +1036,15 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
     return function (view) {
         view.addEventListener('viewshow', function () {
             applyTheme(view);
+            // Emby can set its theme and drawer just after viewshow on a fresh load: check again once painted.
+            setTimeout(function () { applyTheme(view); }, 500);
+            loadFooter(view);
             state.view = storedView() === 'posters' ? 'posters' : 'list';
             state.showInArr = storedShowInArr();
             if (!view.dataset.acInit) {
                 view.dataset.acInit = '1';
                 bind(view);
+                window.addEventListener('resize', function () { if (view.isConnected && view.offsetParent !== null) applyTheme(view); });
             }
             loadConfig().then(function () {
                 return loadMissing(view, true);
