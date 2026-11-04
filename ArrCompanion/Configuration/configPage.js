@@ -789,10 +789,19 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         return '<div class="checkboxContainer"><label><input type="checkbox" is="emby-checkbox" ' + attrs + (checked ? ' checked' : '') + ' /><span>' + text + '</span></label></div>';
     }
 
-    // One server, folded inside the Sonarr & Radarr panel (Home Screen Companion's provider panels).
+    // Settings panels: open or closed as the user left them, else as given.
+    function foldOpen(key, dflt) { return key in state.folds ? !!state.folds[key] : dflt; }
+    function setFold(header, open) {
+        header.nextElementSibling.style.display = open ? 'block' : 'none';
+        var chevron = header.querySelector('.ac-chevron');
+        if (chevron) chevron.style.transform = open ? 'rotate(180deg)' : '';
+    }
+
+    // One server, a panel of its own inside Servers (Home Screen Companion's provider panels).
     function serverPanel(k) {
-        var i = instanceOf(k.kind) || { Kind: k.kind, Monitored: true, SearchOnAdd: true, SeasonFolder: true, MinimumAvailability: 'released', SeriesMonitor: 'all' };
-        var open = !!state.folds['server-' + k.kind];
+        var saved = instanceOf(k.kind);
+        var i = saved || { Kind: k.kind, Monitored: true, SearchOnAdd: true, SeasonFolder: true, MinimumAvailability: 'released', SeriesMonitor: 'all' };
+        var open = foldOpen('server-' + k.kind, !isSetUp(saved));
         function select(label, name, html) {
             return '<div class="inputContainer"><label class="selectLabel">' + label + '</label><select is="emby-select" data-s="' + name + '" style="width:100%;">' + html + '</select></div>';
         }
@@ -806,19 +815,25 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             + '<i class="md-icon ac-chevron"' + (open ? ' style="transform: rotate(180deg);"' : '') + '>expand_more</i>'
             + '</div>'
             + '<div class="ac-section-body" style="display:' + (open ? 'block' : 'none') + ';">'
-            + '<div class="inputContainer"><input is="emby-input" type="text" data-s="Url" label="' + k.label + ' Server URL" placeholder="http://localhost:' + k.port + '" autocomplete="off" spellcheck="false" value="' + esc(i.Url || '') + '" /></div>'
+            + '<div class="ac-s-row">'
+            + '<div class="inputContainer"><input is="emby-input" type="text" data-s="Url" label="' + k.label + ' Server URL" placeholder="http://localhost:' + k.port + '" autocomplete="off" spellcheck="false" value="' + esc(i.Url || '') + '" />'
+            + '<div class="ac-s-test"><button type="button" is="emby-button" class="raised ac-btn-neutral" data-server-action="test"><i class="md-icon" style="margin-right:5px;">wifi_tethering</i><span>Test Connection</span></button><span class="ac-muted" data-test-result></span></div></div>'
             + '<div class="inputContainer"><input is="emby-input" type="text" class="ac-key" data-s="ApiKey" label="' + k.label + ' API Key" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore value="' + esc(i.ApiKey || '') + '" />'
             + '<label class="ac-show-key"><input type="checkbox" data-show-key /> Show</label>'
-            + '<div class="fieldDescription">The API key is under Settings › General in ' + k.label + '. It stays on the Emby server; the browser never talks to ' + k.label + '.</div></div>'
-            + '<div class="ac-row"><button type="button" is="emby-button" class="raised ac-btn-neutral" data-server-action="test"><i class="md-icon" style="margin-right:5px;">wifi_tethering</i><span>Test Connection</span></button><span class="ac-muted" data-test-result></span></div>'
-            + '<div class="ac-eyebrow" style="margin: 24px 0 8px;">Defaults for new ' + (k.type === 'show' ? 'shows' : 'movies') + ' (rules always use these)</div>'
+            + '<div class="fieldDescription">In ' + k.label + ' under Settings › General. It stays on the Emby server.</div></div>'
+            + '</div>'
+            + '<div class="ac-eyebrow" style="margin: 4px 0 8px;">Defaults for new ' + (k.type === 'show' ? 'shows' : 'movies') + ' (rules always use these)</div>'
+            + '<div class="ac-s-row">'
             + select('Root folder', 'RootFolderPath', folderOptions(null, i.RootFolderPath || ''))
             + select('Quality profile', 'QualityProfileId', profileOptions(null, i.QualityProfileId || 0))
+            + '</div>'
+            + '<div class="ac-s-row">'
             + extra
-            + '<div style="margin-top: 15px;">'
+            + '<div class="ac-s-checks">'
             + settingsCheckbox('data-s="Monitored"', i.Monitored !== false, 'Monitored')
             + settingsCheckbox('data-s="SearchOnAdd"', i.SearchOnAdd !== false, 'Search when added')
             + (k.kind === 'sonarr' ? settingsCheckbox('data-s="SeasonFolder"', i.SeasonFolder !== false, 'Season folders') : '')
+            + '</div>'
             + '</div>'
             + '<div class="ac-banner error" data-options-error style="display:none;"></div>'
             + '</div>'
@@ -827,12 +842,17 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
 
     function renderServers(view) {
         if (!state.config) return;
-        // Sonarr first, as the panel's title has them.
+        // Sonarr first, as the panel's label has them.
         view.querySelector('#acServers').innerHTML = [KINDS[1], KINDS[0]].map(serverPanel).join('');
+        // Servers is open; the file's panels open when the file is not there.
+        var noFile = !!(state.catalog && state.catalog.File && !state.catalog.File.Found);
+        [['servers', true], ['other', noFile], ['file', noFile], ['posters', false]].forEach(function (f) {
+            setFold(view.querySelector('[data-fold="' + f[0] + '"]'), foldOpen(f[0], f[1]));
+        });
         view.querySelector('#acListPath').value = state.config.MissingListPath || '';
         view.querySelector('#acTmdbKey').value = state.config.TmdbApiKey || '';
         var file = state.catalog && state.catalog.File;
-        view.querySelector('#acListPathHint').innerHTML = 'Leave empty to read the file Home Screen Companion keeps. It needs Missing titles on, with "Keep the list in a file" and JSON.'
+        view.querySelector('#acListPathHint').innerHTML = 'Empty: the file Home Screen Companion keeps (Missing titles, "Keep the list in a file", JSON).'
             + (file && file.Path ? '<br />Now reading: <code>' + esc(file.Path) + '</code>' + (file.Found ? '' : ' (not there yet)') : '');
         KINDS.forEach(function (k) {
             var i = instanceOf(k.kind);
@@ -1093,10 +1113,8 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         view.querySelector('[data-tab-content="settings"]').addEventListener('click', function (e) {
             var header = e.target.closest('[data-fold]');
             if (!header) return;
-            var body = header.nextElementSibling, chevron = header.querySelector('.ac-chevron');
-            var open = body.style.display === 'none';
-            body.style.display = open ? 'block' : 'none';
-            if (chevron) chevron.style.transform = open ? 'rotate(180deg)' : '';
+            var open = header.nextElementSibling.style.display === 'none';
+            setFold(header, open);
             state.folds[header.getAttribute('data-fold')] = open;
         });
         view.querySelector('[data-tab-content="settings"]').addEventListener('change', function (e) {

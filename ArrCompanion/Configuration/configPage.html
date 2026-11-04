@@ -278,9 +278,16 @@
         .ac-section .ac-section .ac-section-title { font-size: 0.95em; }
         .ac-section .ac-section .ac-chevron { font-size: 1.1em; opacity: 0.65; }
         .ac-section .ac-section .ac-section-body { padding: 0 14px 14px; border-top: none; background: transparent; }
-        .ac-settings .inputContainer + .inputContainer { margin-top: 12px; }
+        /* Compact: related fields side by side */
+        .ac-settings .inputContainer { margin-bottom: 12px; }
+        .ac-settings .fieldDescription { margin-top: 4px; }
         .ac-settings .ac-show-key { margin-top: 4px; }
-        .ac-settings .checkboxContainer { margin-bottom: 0.6em; }
+        .ac-s-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; align-items: start; }
+        .ac-s-checks { display: flex; flex-wrap: wrap; align-items: center; gap: 0 20px; min-height: 2.2em; margin-top: 1.55em; }
+        .ac-settings .ac-s-checks .checkboxContainer { margin: 0; }
+        .ac-s-test { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+        .ac-s-test .ac-btn-neutral { margin: 0; }
+        @media (max-width: 700px) { .ac-s-row { grid-template-columns: 1fr; } .ac-s-checks { margin-top: 0; margin-bottom: 12px; } }
         /* Save Settings floats above the footer, as in Home Screen Companion; it is inside the Settings
            tab, so it is not there on the other tabs. */
         .ac-settings { padding-bottom: 70px; }
@@ -463,40 +470,51 @@
                 <div class="ac-section" style="margin-bottom: 15px;">
                     <div class="ac-section-header" data-fold="servers">
                         <i class="md-icon ac-section-icon">cloud_download</i>
-                        <span class="ac-section-title">Sonarr &amp; Radarr</span>
-                        <i class="md-icon ac-chevron" style="transform: rotate(180deg);">expand_more</i>
+                        <span class="ac-section-title">Servers</span>
+                        <i class="md-icon ac-chevron">expand_more</i>
                     </div>
-                    <div class="ac-section-body" style="display:block; padding-top: 4px;">
-                        <div class="ac-eyebrow" style="margin: 0 0 8px;">Servers</div>
+                    <div class="ac-section-body" style="display:none; padding-top: 4px;">
+                        <div class="ac-eyebrow" style="margin: 0 0 8px;">Sonarr &amp; Radarr</div>
                         <div id="acServers"></div>
                     </div>
                 </div>
 
                 <div class="ac-section" style="margin-bottom: 15px;">
-                    <div class="ac-section-header" data-fold="file">
-                        <i class="md-icon ac-section-icon">description</i>
-                        <span class="ac-section-title">Missing titles file</span>
+                    <div class="ac-section-header" data-fold="other">
+                        <i class="md-icon ac-section-icon">tune</i>
+                        <span class="ac-section-title">List &amp; poster settings</span>
                         <i class="md-icon ac-chevron">expand_more</i>
                     </div>
-                    <div class="ac-section-body" style="display:none;">
-                        <div class="inputContainer">
-                            <input is="emby-input" type="text" id="acListPath" label="File or folder" placeholder="Home Screen Companion's file" autocomplete="off" spellcheck="false" />
-                            <div class="fieldDescription" id="acListPathHint">Leave empty to read the file Home Screen Companion keeps. It needs Missing titles on, with "Keep the list in a file" and JSON.</div>
+                    <div class="ac-section-body" style="display:none; padding-top: 4px;">
+                        <div class="ac-eyebrow" style="margin: 0 0 8px;">Missing titles</div>
+                        <div class="ac-section">
+                            <div class="ac-section-header" data-fold="file">
+                                <i class="md-icon ac-section-icon">description</i>
+                                <span class="ac-section-title">Missing titles file</span>
+                                <i class="md-icon ac-chevron">expand_more</i>
+                            </div>
+                            <div class="ac-section-body" style="display:none;">
+                                <div class="inputContainer">
+                                    <input is="emby-input" type="text" id="acListPath" label="File or folder" placeholder="Home Screen Companion's file" autocomplete="off" spellcheck="false" />
+                                    <div class="fieldDescription" id="acListPathHint">Empty: the file Home Screen Companion keeps (Missing titles, "Keep the list in a file", JSON).</div>
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                </div>
 
-                <div class="ac-section" style="margin-bottom: 15px;">
-                    <div class="ac-section-header" data-fold="posters">
-                        <i class="md-icon ac-section-icon">image</i>
-                        <span class="ac-section-title">Posters</span>
-                        <i class="md-icon ac-chevron">expand_more</i>
-                    </div>
-                    <div class="ac-section-body" style="display:none;">
-                        <div class="inputContainer">
-                            <input is="emby-input" type="text" class="ac-key" id="acTmdbKey" label="TMDb API key or read access token" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="Home Screen Companion's key" />
-                            <label class="ac-show-key"><input type="checkbox" data-show-key /> Show</label>
-                            <div class="fieldDescription">Leave empty to use the TMDb key set in Home Screen Companion. The posters are looked up once and kept; the browser loads them from TMDb.</div>
+                        <div class="ac-eyebrow" style="margin: 18px 0 8px;">Posters</div>
+                        <div class="ac-section">
+                            <div class="ac-section-header" data-fold="posters">
+                                <i class="md-icon ac-section-icon">image</i>
+                                <span class="ac-section-title">TMDb</span>
+                                <i class="md-icon ac-chevron">expand_more</i>
+                            </div>
+                            <div class="ac-section-body" style="display:none;">
+                                <div class="inputContainer">
+                                    <input is="emby-input" type="text" class="ac-key" id="acTmdbKey" label="TMDb API key or read access token" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="Home Screen Companion's key" />
+                                    <label class="ac-show-key"><input type="checkbox" data-show-key /> Show</label>
+                                    <div class="fieldDescription">Empty: the TMDb key set in Home Screen Companion.</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -562,9 +580,8 @@
 
                 <div class="ac-help-section"><i class="md-icon">settings</i><span>Settings</span></div>
                 <div class="ac-help-text">
-                    <p><strong>Sonarr &amp; Radarr</strong>: each server's URL and API key, <em>Test connection</em>, and the defaults for new titles (root folder, quality profile, monitoring, search). Emby's server talks to Sonarr and Radarr; the API keys never reach the browser.</p>
-                    <p><strong>Missing titles file</strong>: empty reads Home Screen Companion's file; a file or folder here reads that one instead.</p>
-                    <p><strong>Posters</strong>: a TMDb key; empty uses Home Screen Companion's.</p>
+                    <p><strong>Servers</strong>: Sonarr and Radarr, each with its URL and API key, <em>Test Connection</em>, and the defaults for new titles (root folder, quality profile, monitoring, search). Emby's server talks to Sonarr and Radarr; the API keys never reach the browser.</p>
+                    <p><strong>List &amp; poster settings</strong>: the missing titles file (empty reads Home Screen Companion's file; a file or folder here reads that one instead) and a TMDb key for the posters (empty uses Home Screen Companion's).</p>
                 </div>
 
                 <div class="ac-help-foot">
