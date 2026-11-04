@@ -281,6 +281,17 @@
         .ac-settings .inputContainer + .inputContainer { margin-top: 12px; }
         .ac-settings .ac-show-key { margin-top: 4px; }
         .ac-settings .checkboxContainer { margin-bottom: 0.6em; }
+        /* Save Settings floats above the footer, as in Home Screen Companion; it is inside the Settings
+           tab, so it is not there on the other tabs. */
+        .ac-settings { padding-bottom: 70px; }
+        .ac-floating-actions { position: fixed; bottom: 62px; right: 30px; z-index: 9000; display: flex; gap: 15px; }
+        #ArrCompanionConfigPage .ac-fab-btn {
+            box-shadow: var(--ac-shadow-float) !important; height: 44px !important; border-radius: 8px !important;
+            padding: 0 18px !important; white-space: nowrap; text-transform: none; letter-spacing: 0; font-weight: 500;
+        }
+        #ArrCompanionConfigPage .ac-btn-save { background-color: var(--ac-primary) !important; color: #fff !important; border: 1px solid transparent !important; }
+        #ArrCompanionConfigPage .ac-btn-save:hover:not(:disabled) { background-color: var(--ac-primary-hover) !important; }
+        #ArrCompanionConfigPage .ac-btn-save:active:not(:disabled) { background-color: var(--ac-primary-pressed) !important; }
         #ArrCompanionConfigPage .emby-button.ac-btn-neutral {
             border-radius: 8px; text-transform: none; letter-spacing: 0; font-weight: 500;
             background: var(--ac-tint-1) !important; border: 1px solid var(--ac-hairline-strong) !important;
@@ -490,9 +501,10 @@
                     </div>
                 </div>
 
-                <div class="ac-row">
-                    <span style="flex:1"></span>
-                    <button type="button" class="ac-btn primary" id="acSaveSettings"><i class="md-icon">save</i>Save</button>
+                <div class="ac-floating-actions">
+                    <button is="emby-button" type="button" class="raised button-submit ac-fab-btn ac-btn-save" id="acSaveSettings" disabled style="opacity:0.5;">
+                        <i class="md-icon" style="margin-right:5px;">save</i><span>Save Settings</span>
+                    </button>
                 </div>
             </div>
         </div>

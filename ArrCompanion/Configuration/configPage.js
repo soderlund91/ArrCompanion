@@ -838,6 +838,23 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             var i = instanceOf(k.kind);
             if (isSetUp(i)) refreshServerOptions(view, k, false);
         });
+        view._acSettingsSaved = settingsState(view);
+        checkSettings(view);
+    }
+
+    // Save Settings is on only when a setting differs from what was loaded or saved (as in Home Screen Companion).
+    function settingsState(view) {
+        var tab = view.querySelector('[data-tab-content="settings"]');
+        return JSON.stringify(Array.prototype.map.call(tab.querySelectorAll('[data-s], #acListPath, #acTmdbKey'), function (el) {
+            var server = el.closest('[data-server]');
+            return (server ? server.getAttribute('data-server') + '.' : '') + (el.getAttribute('data-s') || el.id) + '=' + (el.type === 'checkbox' ? el.checked : el.value.trim());
+        }));
+    }
+    function checkSettings(view) {
+        var btn = view.querySelector('#acSaveSettings');
+        var dirty = view._acSettingsSaved !== undefined && settingsState(view) !== view._acSettingsSaved;
+        btn.disabled = !dirty;
+        btn.style.opacity = dirty ? '1' : '0.5';
     }
 
     function panelValue(panel, name) { return panel.querySelector('[data-s="' + name + '"]'); }
@@ -899,7 +916,9 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         var listPath = view.querySelector('#acListPath').value.trim();
         var tmdbKey = view.querySelector('#acTmdbKey').value.trim();
         var btn = view.querySelector('#acSaveSettings');
+        var saving = settingsState(view);
         btn.disabled = true;
+        btn.style.opacity = '0.5';
         saveConfig(function (server) {
             // The page's instances replace theirs; any others (more of a kind, later) are kept.
             var shown = {};
@@ -910,11 +929,15 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             server.TmdbApiKey = tmdbKey;
         }).then(function () {
             toast('Settings saved');
+            view._acSettingsSaved = saving;
+            checkSettings(view);
             state.posters = {};
             state.noTmdbKey = false;
             return loadMissing(view, true);
-        }).catch(function (err) { toast('Could not save: ' + err.message); })
-        .then(function () { btn.disabled = false; });
+        }, function (err) {
+            toast('Could not save: ' + err.message);
+            checkSettings(view);
+        });
     }
 
     // ---- Wiring ----
@@ -1060,7 +1083,12 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             var kind = b.closest('[data-server]').getAttribute('data-server');
             testServer(view, KINDS.filter(function (k) { return k.kind === kind; })[0]);
         });
-        view.querySelector('#acSaveSettings').addEventListener('click', function () { saveSettings(view); });
+        view.querySelector('#acSaveSettings').addEventListener('click', function () { if (!this.disabled) saveSettings(view); });
+        ['input', 'change'].forEach(function (type) {
+            view.querySelector('[data-tab-content="settings"]').addEventListener(type, function (e) {
+                if (!e.target.hasAttribute('data-show-key')) checkSettings(view);
+            });
+        });
         // Settings panels fold open and closed (Home Screen Companion's settings-panel-toggle).
         view.querySelector('[data-tab-content="settings"]').addEventListener('click', function (e) {
             var header = e.target.closest('[data-fold]');
