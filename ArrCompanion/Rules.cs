@@ -55,6 +55,7 @@ namespace ArrCompanion
             return (r.TopN > 0 ? $"Top {r.TopN} {what} of {where}" : $"All {what} on {where}") + (r.MinYear > 0 ? $" from {r.MinYear}" : "")
                 + ((r.Languages?.Count ?? 0) > 0 ? " in " + Names(r.Languages!) : "")
                 + ((r.ExcludeLanguages?.Count ?? 0) > 0 ? " not in " + Names(r.ExcludeLanguages!) : "")
+                + (r.MyLanguagesMode == ArrRule.Mine.Only ? " in your languages" : r.MyLanguagesMode == ArrRule.Mine.Not ? " not in your languages" : "")
                 + (r.MinMatch > 0 ? $", match at least {r.MinMatch}%" : "");
         }
 
@@ -140,9 +141,11 @@ namespace ArrCompanion
             var outcome = new Outcome();
             var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var unreadable = catalog.Errors.Count > 0;
-            foreach (var rule in rules)
+            var mine = config.MyLanguageCodes();
+            foreach (var asked in rules)
             {
-                var label = RuleLabel(rule);
+                var label = RuleLabel(asked);
+                var rule = asked.WithMyLanguages(mine);
                 var matching = catalog.Rows
                     .Where(r => (r.Status == Catalog.Status.Missing || (preview && r.Status == Catalog.Status.NoServer)) && !r.AddedBefore && !taken.Contains(r.Key))
                     .Select(r => (Row: r, Place: Matches(rule, r)))

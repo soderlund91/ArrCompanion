@@ -93,6 +93,10 @@ namespace ArrCompanion
             return c == "nb" || c == "nn" ? "no" : c;
         }
 
+        /// <summary>Every language with a name, by code (Norwegian once).</summary>
+        internal static IEnumerable<KeyValuePair<string, string>> All() =>
+            Names.Where(kv => kv.Key != "nb" && kv.Key != "nn").OrderBy(kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+
         /// <summary>The language's English name ("Chinese"); the code itself when it is not in the table.</summary>
         internal static string Name(string? code)
         {

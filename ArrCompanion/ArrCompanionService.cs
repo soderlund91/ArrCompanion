@@ -134,6 +134,15 @@ namespace ArrCompanion
         public string Url { get; set; } = "";   // "" = no poster
     }
 
+    // The languages the page can offer under Settings › Your languages.
+    [Route("/ArrCompanion/Languages", "GET")]
+    [Authenticated(Roles = "Admin")]
+    public class LanguagesRequest : IReturn<List<LanguageOption>>
+    {
+    }
+
+    public class LanguageOption { public string Code { get; set; } = ""; public string Name { get; set; } = ""; }
+
     [Route("/ArrCompanion/History", "GET")]
     [Authenticated(Roles = "Admin")]
     public class HistoryRequest : IReturn<List<History.Entry>>
@@ -316,6 +325,9 @@ namespace ArrCompanion
                 Posters = paths.Select(p => new PosterItem { Key = p.Key, Url = Posters.Url(p.Value) }).ToList()
             };
         }
+
+        public object Get(LanguagesRequest request) =>
+            Languages.All().Select(kv => new LanguageOption { Code = kv.Key, Name = kv.Value }).ToList();
 
         public object Get(HistoryRequest request) =>
             History.Recent(request.Count <= 0 ? 200 : Math.Min(request.Count, 1000), _json);

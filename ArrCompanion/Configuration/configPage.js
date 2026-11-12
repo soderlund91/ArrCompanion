@@ -28,7 +28,8 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         hiddenView: false, // Show hidden: only the hidden titles
         view: 'list',      // 'list' | 'posters'
         loads: 0,          // GET ArrCompanion/Missing asked so far; an older answer is dropped
-        folds: {}          // Settings panels the user opened or closed: data-fold -> open
+        folds: {},         // Settings panels the user opened or closed: data-fold -> open
+        languages: null    // GET ArrCompanion/Languages: [{ Code, Name }]
     };
 
     function storedView() { try { return localStorage.getItem('arrCompanionView') || 'list'; } catch (e) { return 'list'; } }
@@ -144,10 +145,20 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
     function hasDefaults(i) { return !!(i && (i.RootFolderPath || '').trim() && i.QualityProfileId > 0); }
     function instanceLabel(i, k) { return (i && (i.Name || '').trim()) || k.label; }
 
+    // Your languages: the codes set under Settings; English when none is.
+    function myLangCodes(codes) {
+        var out = [];
+        (codes || []).forEach(function (c) { c = String(c || '').trim().toLowerCase(); if (c && out.indexOf(c) < 0) out.push(c); });
+        return out.length ? out : ['en'];
+    }
+    function myLangs() { return myLangCodes(state.config && state.config.MyLanguages); }
+    function isMine(code) { return !!code && myLangs().indexOf(String(code).toLowerCase()) >= 0; }
+
     function loadConfig() {
         return window.ApiClient.getPluginConfiguration(pluginId).then(function (c) {
             c.Instances = c.Instances || [];
             c.Rules = c.Rules || [];
+            c.MyLanguages = myLangCodes(c.MyLanguages);
             state.config = c;
             return c;
         });
@@ -238,17 +249,23 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             names[r.Language] = r.LanguageName || r.Language;
         });
         var codes = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a] || names[a].localeCompare(names[b]); });
-        if (current && current !== '?' && !counts[current]) current = '';
+        if (current && current !== '?' && current !== '@mine' && current !== '@other' && !counts[current]) current = '';
+        var mine = 0, other = 0;
+        codes.forEach(function (c) { if (isMine(c)) mine += counts[c]; else other += counts[c]; });
         sel.innerHTML = option('', 'Any language', !current)
+            + option('@mine', 'Your languages · ' + mine, current === '@mine')
+            + option('@other', 'Other languages · ' + other, current === '@other')
             + codes.map(function (c) { return option(c, names[c] + ' · ' + counts[c], c === current); }).join('')
             + (unknown && codes.length ? option('?', 'Not known · ' + unknown, current === '?') : '');
         sel.style.display = codes.length ? '' : 'none';
     }
 
     // The languages the page knows a name for: the titles', and any a rule names.
-    function langNames() {
+    // all: every language the server has a name for (Settings › Your languages).
+    function langNames(all) {
         var names = {};
         ((state.catalog && state.catalog.Rows) || []).forEach(function (r) { if (r.Language) names[r.Language] = r.LanguageName || r.Language; });
+        if (all) (state.languages || []).forEach(function (l) { if (!names[l.Code]) names[l.Code] = l.Name; });
         return names;
     }
 
@@ -302,6 +319,14 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         return ranked[0] || places[0] || null;
     }
 
+    // '' any, '?' not known, '@mine' your languages, '@other' known and not yours, else that language.
+    function langFilterLets(lang, code) {
+        if (lang === '?') return !code;
+        if (lang === '@mine') return isMine(code);
+        if (lang === '@other') return !!code && !isMine(code);
+        return code === lang;
+    }
+
     // The rows the filters let through; ignoreType: all but the Movies / Shows chip (for the chips' counts);
     // withInArr: as if In Sonarr / Radarr were on (for its count).
     function visibleRows(view, ignoreType, withInArr) {
@@ -316,7 +341,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         var out = rows.filter(function (r) {
             if (q && (r.Title || '').toLowerCase().indexOf(q) < 0 && (r.Imdb || '').toLowerCase().indexOf(q) < 0) return false;
             if (type && r.Type !== type) return false;
-            if (lang && (lang === '?' ? !!r.Language : r.Language !== lang)) return false;
+            if (lang && !langFilterLets(lang, r.Language)) return false;
             if (state.hiddenView ? r.Status !== 'ignored' : !isOpen(r) && !((state.showInArr || withInArr) && r.Status === 'inArr')) return false;
             var places = (r.Places || []).filter(function (p) { return !list || p.List === list; });
             if (list && !places.length) return false;
@@ -389,10 +414,17 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         return '';
     }
 
-    // "Match 82%": how well the title fits what the server watched; the reason on hover.
+    // "Match 82%": how well the title fits what the server watched, in four bands; the reason on hover.
+    function matchBand(m) { return m >= 70 ? 'high' : m >= 50 ? 'good' : m >= 30 ? 'fair' : 'low'; }
     function matchPill(row) {
         if (row.Match == null) return '';
-        return '<span class="ac-match' + (row.Match >= 70 ? ' high' : '') + '"' + (row.MatchReason ? ' title="' + esc(row.MatchReason) + '"' : '') + '>Match ' + row.Match + '%</span>';
+        return '<span class="ac-match ' + matchBand(row.Match) + '"' + (row.MatchReason ? ' title="' + esc(row.MatchReason) + '"' : '') + '>Match <b>' + row.Match + '%</b></span>';
+    }
+
+    // The original language: green in one of your languages, orange in any other, grey once looked up and not known.
+    function langPill(row) {
+        if (!row.Language) return row.HasDetails ? '<span class="ac-lang unknown" title="Original language not known">Unknown</span>' : '';
+        return '<span class="ac-lang ' + (isMine(row.Language) ? 'mine' : 'foreign') + '" title="' + langTitle(row) + '">' + esc(row.LanguageName || row.Language.toUpperCase()) + '</span>';
     }
 
     function langTitle(row) {
@@ -492,18 +524,16 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
                         + '<div class="ac-cover">' + posterHtml(r)
                         + (rank != null ? '<div class="ac-card-rank' + (rank <= 3 ? ' top' : '') + '">#' + rank + '</div>' : '')
                         + (check ? '<div class="ac-card-sel">' + check + '</div>' : '')
-                        + (r.LanguageName ? '<div class="ac-card-lang" title="' + langTitle(r) + '">' + esc(r.LanguageName) + '</div>' : '')
+                        + (langPill(r) || r.Match != null ? '<div class="ac-card-foot">' + langPill(r) + matchPill(r) + '</div>' : '')
                         + '</div>'
                         + '<div class="ac-card-title" title="' + esc(r.Title) + '">' + esc(r.Title) + '</div>'
                         + '<div class="ac-card-meta">' + cardMeta.join(' · ') + statusPill(r) + '</div>'
-                        + (r.Match != null ? '<div class="ac-card-meta">' + matchPill(r) + '</div>' : '')
                         + (actions ? '<div class="ac-card-actions">' + actions + '</div>' : '')
                         + '</div>';
                 }
                 var meta = [];
                 if (r.Year) meta.push(r.Year);
                 meta.push(r.Type === 'show' ? 'Series' : 'Movie');
-                if (r.LanguageName) meta.push('<span title="' + langTitle(r) + '">' + esc(r.LanguageName) + '</span>');
                 if (r.Imdb) meta.push(imdbLink(r));
                 return '<div class="ac-item' + dim + rowCls + '"' + rowAttrs + '>'
                     + '<div class="ac-item-check">' + check + '</div>'
@@ -511,7 +541,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
                     + posterHtml(r)
                     + '<div class="ac-item-info">'
                     + '<div class="ac-item-title">' + esc(r.Title) + '</div>'
-                    + '<div class="ac-item-meta"><span>' + meta.join(' · ') + '</span>' + matchPill(r) + statusPill(r) + '</div>'
+                    + '<div class="ac-item-meta"><span>' + meta.join(' · ') + '</span>' + langPill(r) + matchPill(r) + statusPill(r) + '</div>'
                     + placeTags(r, list)
                     + '</div>'
                     + '<div class="ac-item-actions">' + actions + '</div>'
@@ -729,6 +759,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             + (r.MinYear > 0 ? ' from ' + r.MinYear : '')
             + ((r.Languages || []).length ? ' in ' + langs(r.Languages) : '')
             + ((r.ExcludeLanguages || []).length ? ' not in ' + langs(r.ExcludeLanguages) : '')
+            + (r.MyLanguagesMode === 'only' ? ' in your languages' : r.MyLanguagesMode === 'not' ? ' not in your languages' : '')
             + (r.MinMatch > 0 ? ', match at least ' + r.MinMatch + '%' : '')
             + (r.MaxPerRun > 0 ? ', at most ' + r.MaxPerRun + ' per run' : '');
     }
@@ -772,6 +803,8 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             + '<div class="ac-rule-grid ac-rule-grid-wide">'
             + langField('Only these languages', 'Languages', r.Languages)
             + langField('Not these languages', 'ExcludeLanguages', r.ExcludeLanguages)
+            + '<label class="ac-field"><span>Your languages</span><select class="ac-select" data-r="MyLanguagesMode">'
+                + option('', 'Any', !r.MyLanguagesMode) + option('only', 'Only your languages', r.MyLanguagesMode === 'only') + option('not', 'Not your languages', r.MyLanguagesMode === 'not') + '</select></label>'
             + '<label class="ac-field"><span>Match at least % (0 = any)</span><input type="number" min="0" max="100" class="ac-input" data-r="MinMatch" value="' + (r.MinMatch || 0) + '" /></label>'
             + '</div>'
             + '<div class="ac-preview" data-preview></div>'
@@ -794,6 +827,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             r.MinYear = int(v('MinYear').value);
             r.MaxPerRun = int(v('MaxPerRun').value);
             r.MinMatch = Math.min(100, int(v('MinMatch').value));
+            r.MyLanguagesMode = v('MyLanguagesMode').value;
             ['Languages', 'ExcludeLanguages'].forEach(function (name) {
                 r[name] = Array.prototype.map.call(card.querySelectorAll('[data-r-langs="' + name + '"] .ac-lang-chip'), function (c) { return c.getAttribute('data-code'); });
             });
@@ -951,12 +985,14 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         // Sonarr first, as the panel's label has them.
         view.querySelector('#acServers').innerHTML = [KINDS[1], KINDS[0]].map(serverPanel).join('');
         // Servers is open; the file's panels open when the file is not there.
-        [['servers', true], ['posters', false]].forEach(function (f) {
+        [['servers', true], ['posters', false], ['languages', false]].forEach(function (f) {
             setFold(view.querySelector('[data-fold="' + f[0] + '"]'), foldOpen(f[0], f[1]));
         });
         fileFolds(view);
         view.querySelector('#acListPath').value = state.config.MissingListPath || '';
         view.querySelector('#acTmdbKey').value = state.config.TmdbApiKey || '';
+        renderMyLangs(view, myLangs());
+        if (!state.languages) loadLanguages().then(function () { if (view._acSettingsSaved !== undefined) renderMyLangs(view, readMyLangs(view)); });
         var file = state.catalog && state.catalog.File;
         view.querySelector('#acListPathHint').innerHTML = 'Empty: the file Home Screen Companion keeps (Missing titles, "Keep the list in a file", JSON).'
             + (file && file.Path ? '<br />Now reading: <code>' + esc(file.Path) + '</code>' + (file.Found ? '' : ' (not there yet)') : '');
@@ -974,13 +1010,32 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         return JSON.stringify(Array.prototype.map.call(tab.querySelectorAll('[data-s], #acListPath, #acTmdbKey'), function (el) {
             var server = el.closest('[data-server]');
             return (server ? server.getAttribute('data-server') + '.' : '') + (el.getAttribute('data-s') || el.id) + '=' + (el.type === 'checkbox' ? el.checked : el.value.trim());
-        }));
+        }).concat(['MyLanguages=' + readMyLangs(view).join(',')]));
     }
     function checkSettings(view) {
         var btn = view.querySelector('#acSaveSettings');
         var dirty = view._acSettingsSaved !== undefined && settingsState(view) !== view._acSettingsSaved;
         btn.disabled = !dirty;
         btn.style.opacity = dirty ? '1' : '0.5';
+    }
+
+    // Your languages under Settings: chips (the last one stays), and a pick list of the others.
+    function loadLanguages() {
+        return api('ArrCompanion/Languages').then(function (list) { state.languages = list || []; }, function () { state.languages = []; });
+    }
+    function readMyLangs(view) {
+        return Array.prototype.map.call(view.querySelectorAll('#acMyLangs .ac-lang-chip'), function (c) { return c.getAttribute('data-code'); });
+    }
+    function renderMyLangs(view, codes) {
+        var names = langNames(true);
+        var left = Object.keys(names).filter(function (c) { return codes.indexOf(c) < 0; })
+            .sort(function (a, b) { return names[a].localeCompare(names[b]); });
+        view.querySelector('#acMyLangs').innerHTML = codes.map(function (c) {
+            return '<span class="ac-lang-chip" data-code="' + esc(c) + '">' + esc(names[c] || c.toUpperCase())
+                + (codes.length > 1 ? '<button type="button" data-mylang-remove title="Remove"><i class="md-icon">close</i></button>' : '') + '</span>';
+        }).join('')
+            + '<select class="ac-select" id="acMyLangAdd"' + (left.length ? '' : ' disabled') + '>' + option('', 'Add…', true)
+            + left.map(function (c) { return option(c, names[c], false); }).join('') + '</select>';
     }
 
     function panelValue(panel, name) { return panel.querySelector('[data-s="' + name + '"]'); }
@@ -1041,6 +1096,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         });
         var listPath = view.querySelector('#acListPath').value.trim();
         var tmdbKey = view.querySelector('#acTmdbKey').value.trim();
+        var myLanguages = readMyLangs(view);
         var btn = view.querySelector('#acSaveSettings');
         var saving = settingsState(view);
         btn.disabled = true;
@@ -1053,6 +1109,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             server.Instances = panels.filter(function (p) { return p.Url || p.ApiKey || instances().some(function (i) { return i.Id === p.Id; }); }).concat(kept);
             server.MissingListPath = listPath;
             server.TmdbApiKey = tmdbKey;
+            server.MyLanguages = myLanguages;
         }).then(function () {
             toast('Settings saved');
             view._acSettingsSaved = saving;
@@ -1149,7 +1206,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         // Rules
         view.querySelector('#acAddRule').addEventListener('click', function () {
             readRules(view);
-            state.config.Rules.push({ Id: guid(), Name: '', Enabled: true, List: '', MediaType: '', TopN: 3, MinYear: 0, MaxPerRun: 0, InstanceId: '', Languages: [], ExcludeLanguages: [], MinMatch: 0 });
+            state.config.Rules.push({ Id: guid(), Name: '', Enabled: true, List: '', MediaType: '', TopN: 3, MinYear: 0, MaxPerRun: 0, InstanceId: '', Languages: [], ExcludeLanguages: [], MinMatch: 0, MyLanguagesMode: '' });
             renderRules(view);
         });
         view.querySelector('#acRules').addEventListener('input', function (e) {
@@ -1234,6 +1291,19 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             testServer(view, KINDS.filter(function (k) { return k.kind === kind; })[0]);
         });
         view.querySelector('#acSaveSettings').addEventListener('click', function () { if (!this.disabled) saveSettings(view); });
+        view.querySelector('#acMyLangs').addEventListener('change', function (e) {
+            if (e.target.id !== 'acMyLangAdd' || !e.target.value) return;
+            e.stopPropagation();
+            renderMyLangs(view, readMyLangs(view).concat([e.target.value]));
+            checkSettings(view);
+        });
+        view.querySelector('#acMyLangs').addEventListener('click', function (e) {
+            var rm = e.target.closest('[data-mylang-remove]');
+            if (!rm) return;
+            var code = rm.closest('.ac-lang-chip').getAttribute('data-code');
+            renderMyLangs(view, readMyLangs(view).filter(function (c) { return c !== code; }));
+            checkSettings(view);
+        });
         ['input', 'change'].forEach(function (type) {
             view.querySelector('[data-tab-content="settings"]').addEventListener(type, function (e) {
                 if (!e.target.hasAttribute('data-show-key')) checkSettings(view);

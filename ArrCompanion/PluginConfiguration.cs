@@ -24,12 +24,18 @@ namespace ArrCompanion
         // Titles never shown as missing nor added by a rule (TitleKey).
         public List<string> Ignored { get; set; } = new List<string>();
 
+        // The languages the users speak (ISO 639-1): titles in them show green, any other as foreign.
+        // Empty in the file = English (a list with a default would get the saved items added to it).
+        public List<string> MyLanguages { get; set; } = new List<string>();
+
         /// <summary>Ids for new instances and rules, and a rule's server that no longer exists.</summary>
         internal void Normalize()
         {
             Instances ??= new List<ArrInstance>();
             Rules ??= new List<ArrRule>();
             Ignored ??= new List<string>();
+            MyLanguages = Codes(MyLanguages);
+            if (MyLanguages.Count == 0) MyLanguages.Add("en");
             foreach (var i in Instances)
             {
                 if (string.IsNullOrWhiteSpace(i.Id)) i.Id = Guid.NewGuid().ToString("N");
@@ -42,8 +48,16 @@ namespace ArrCompanion
                 r.Languages = Codes(r.Languages);
                 r.ExcludeLanguages = Codes(r.ExcludeLanguages);
                 r.MinMatch = Math.Max(0, Math.Min(100, r.MinMatch));
+                r.MyLanguagesMode = r.MyLanguagesMode == ArrRule.Mine.Only || r.MyLanguagesMode == ArrRule.Mine.Not ? r.MyLanguagesMode : "";
             }
             Ignored = Ignored.Where(k => !string.IsNullOrWhiteSpace(k)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        /// <summary>The languages set as the users' own; English when none is.</summary>
+        internal List<string> MyLanguageCodes()
+        {
+            var codes = Codes(MyLanguages);
+            return codes.Count > 0 ? codes : new List<string> { "en" };
         }
 
         private static List<string> Codes(List<string>? codes) =>
@@ -118,7 +132,26 @@ namespace ArrCompanion
         public List<string> Languages { get; set; } = new List<string>();         // only these original languages (ISO 639-1); empty = any
         public List<string> ExcludeLanguages { get; set; } = new List<string>();  // never these
         public int MinMatch { get; set; }               // match with the server's watching at least this (0-100); 0 = any
+        public string MyLanguagesMode { get; set; } = "";   // only | not: the languages under Settings; "" = either
 
-        internal bool UsesDetails => (Languages?.Count ?? 0) > 0 || (ExcludeLanguages?.Count ?? 0) > 0 || MinMatch > 0;
+        public static class Mine
+        {
+            public const string Only = "only";
+            public const string Not = "not";
+        }
+
+        internal bool UsesDetails => (Languages?.Count ?? 0) > 0 || (ExcludeLanguages?.Count ?? 0) > 0 || MinMatch > 0
+            || MyLanguagesMode == Mine.Only || MyLanguagesMode == Mine.Not;
+
+        /// <summary>The rule with "only / not my languages" turned into its language lists.</summary>
+        internal ArrRule WithMyLanguages(List<string> mine)
+        {
+            if (MyLanguagesMode != Mine.Only && MyLanguagesMode != Mine.Not) return this;
+            var copy = (ArrRule)MemberwiseClone();
+            if (MyLanguagesMode == Mine.Only) copy.Languages = (Languages ?? new List<string>()).Concat(mine).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            else copy.ExcludeLanguages = (ExcludeLanguages ?? new List<string>()).Concat(mine).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            copy.MyLanguagesMode = "";
+            return copy;
+        }
     }
 }
