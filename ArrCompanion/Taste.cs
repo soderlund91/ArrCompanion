@@ -32,6 +32,7 @@ namespace ArrCompanion
     ///   genres    40% — each of its genres by how much of the watching carries it, and (as Next
     ///                   Watch does) by how much more than the library carries it (lift, up to 2×);
     ///   language  25% — its original language's share of all the watching (40% or more = full);
+    ///                   only when the language of at least half the watching is known;
     ///   country   10% — its best country's share of all the watching (40% or more = full);
     ///   people    25% — people in it who are in the watched titles (two strong ones = full).
     /// A part the title has no data for is left out and the others count for it. No genres: no
@@ -44,7 +45,7 @@ namespace ArrCompanion
         private const double GenreW = 0.40, LanguageW = 0.25, CountryW = 0.10, PeopleW = 0.25, MaxGenreLift = 2.0;
         // A language or country with this share of all the watching counts fully. Against all of it, not
         // the most watched one: titles whose language is not known (no TMDb key) do not inflate the rest.
-        private const double FullShare = 0.4;
+        private const double FullShare = 0.4, MinLanguageCoverage = 0.5;
         internal static readonly TimeSpan Stale = TimeSpan.FromHours(6);
 
         private static ILibraryManager? _library;
@@ -73,6 +74,7 @@ namespace ArrCompanion
             public Dictionary<string, double> Genres { get; set; } = new Dictionary<string, double>();      // share of the watching
             public Dictionary<string, double> GenreLift { get; set; } = new Dictionary<string, double>();   // share / the library's share
             public Dictionary<string, double> Languages { get; set; } = new Dictionary<string, double>();
+            public double LanguageCoverage { get; set; }   // share of the watching whose language is known
             public Dictionary<string, double> Countries { get; set; } = new Dictionary<string, double>();
             public Dictionary<string, double> People { get; set; } = new Dictionary<string, double>();      // weight / a watched title's mean weight
         }
@@ -254,7 +256,7 @@ namespace ArrCompanion
                     double share = g.Weight / total;
                     foreach (var x in genres) Add(profile.Genres, x, share);
                     foreach (var x in countries.Distinct(StringComparer.OrdinalIgnoreCase)) Add(profile.Countries, x, share);
-                    if (language.Length > 0) Add(profile.Languages, language, share);
+                    if (language.Length > 0) { Add(profile.Languages, language, share); profile.LanguageCoverage += share; }
                     if (people.TryGetValue(g.Rep.InternalId, out var names))
                         foreach (var x in names) Add(profile.People, x, g.Weight / mean);
                 }
@@ -415,7 +417,9 @@ namespace ArrCompanion
 
             double parts = GenreW, sum = GenreW * genre;
             double language = -1, country = -1, people = -1;
-            if (d.Language.Length > 0 && p.Languages.Count > 0)
+            // Only when the language of most of the watching is known: without a TMDb key only titles in
+            // their own script have one, and the part would favour or hurt them for that alone.
+            if (d.Language.Length > 0 && p.LanguageCoverage >= MinLanguageCoverage)
             {
                 language = p.Languages.TryGetValue(d.Language, out var s) ? Math.Min(1, s / FullShare) : 0;
                 parts += LanguageW; sum += LanguageW * language;

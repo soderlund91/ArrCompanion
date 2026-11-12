@@ -180,8 +180,12 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         var load = ++state.loads;
         clearTimeout(state.enrichTimer);
         if (!state.catalog) list.innerHTML = '<div class="ac-empty"><span class="ac-spin"></span></div>';
-        function show(res) {
+        // poll: an answer while the details are looked up; the page is only drawn again when it shows more.
+        function show(res, poll) {
             if (load !== state.loads) return false;
+            var sig = detailSig(res);
+            if (poll && res.Enriching && sig === state.detailSig) { state.catalog = res; return true; }
+            state.detailSig = sig;
             state.catalog = res;
             var keys = {};
             (res.Rows || []).forEach(function (r) { keys[r.Key] = true; });
@@ -204,7 +208,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             if (load !== state.loads || !res || !res.Enriching) return;
             state.enrichTimer = setTimeout(function () {
                 if (load !== state.loads || !view.isConnected) return;
-                api('ArrCompanion/Missing?Stored=true').then(function (again) { if (show(again)) whileEnriching(again); }, function () { });
+                api('ArrCompanion/Missing?Stored=true').then(function (again) { if (show(again, true)) whileEnriching(again); }, function () { });
             }, 3000);
         }
         return api('ArrCompanion/Missing?Stored=true&Refresh=' + (refresh ? 'true' : 'false') + (full ? '&Full=true' : '')).then(function (res) {
@@ -215,9 +219,17 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         }, failed);
     }
 
+    // What the lookups have filled in so far: languages and matches.
+    function detailSig(res) {
+        var n = 0, langs = 0, match = 0;
+        ((res && res.Rows) || []).forEach(function (r) { if (r.HasDetails) n++; if (r.Language) langs++; if (r.Match != null) match += r.Match + 1; });
+        return [(res && res.Rows || []).length, n, langs, match, res && res.HasMatch].join('|');
+    }
+
     // "Any language" and the languages of the titles, with how many each has.
     function fillLangFilter(view) {
         var sel = view.querySelector('#acFilterLang');
+        if (sel === document.activeElement) return;   // open or in use: left as it is
         var current = sel.value;
         var counts = {}, names = {}, unknown = 0;
         ((state.catalog && state.catalog.Rows) || []).forEach(function (r) {
@@ -242,6 +254,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
 
     function fillListFilter(view) {
         var sel = view.querySelector('#acFilterList');
+        if (sel === document.activeElement) return;
         var current = sel.value;
         var lists = (state.catalog && state.catalog.Lists) || [];
         var counts = {};

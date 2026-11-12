@@ -1,6 +1,7 @@
 using MediaBrowser.Common;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Providers;
 using MediaBrowser.Controller.Plugins;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Serialization;
@@ -29,12 +30,13 @@ namespace ArrCompanion
         private Timer? _timer;
 
         public ListWatcher(IApplicationHost appHost, IJsonSerializer json, ILogManager logManager, IServerConfigurationManager serverConfig,
-            ILibraryManager libraryManager, IUserManager userManager, IUserDataManager userDataManager)
+            ILibraryManager libraryManager, IUserManager userManager, IUserDataManager userDataManager, IProviderManager providerManager)
         {
             _json = json;
             Log.Initialize(logManager);
             MissingList.Initialize(appHost);
             Posters.Initialize(appHost, serverConfig);
+            Posters.Initialize(providerManager);   // the scheduled rules can run before the page is opened
             Taste.Initialize(libraryManager, userManager, userDataManager);
         }
 
