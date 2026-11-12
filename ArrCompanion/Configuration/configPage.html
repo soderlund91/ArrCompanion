@@ -199,9 +199,15 @@
         .ac-card-sel .checkboxLabel::before { margin-right: 0 !important; }
         .ac-card-rank { position: absolute; top: 6px; left: 6px; font-size: 0.75em; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: rgba(0,0,0,0.65); color: #fff; }
         .ac-card-rank.top { background: var(--ac-primary); }
+        /* The original language, on the poster's foot (the place badge's style) */
+        .ac-card-lang { position: absolute; left: 6px; bottom: 6px; max-width: calc(100% - 12px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.7em; font-weight: 500; padding: 1px 6px; border-radius: 4px; background: rgba(0,0,0,0.65); color: #fff; }
         .ac-card-title { font-size: 0.85em; font-weight: 500; line-height: 1.3; overflow-wrap: anywhere; }
         .ac-card-meta { font-size: 0.75em; color: var(--theme-text-secondary); }
         .ac-card-meta .ac-pill { font-size: 0.95em; margin-left: 2px; }
+        /* Match 82%: a quiet tag, green when high */
+        .ac-match { display: inline-block; font-size: 0.92em; padding: 0 7px; border-radius: 4px; background: var(--ac-tint-3); color: var(--theme-text-secondary); white-space: nowrap; font-variant-numeric: tabular-nums; cursor: default; }
+        .ac-match.high { color: var(--ac-primary-text); background: rgba(82,181,75,0.12); }
+        .ac-card-meta .ac-match { font-size: 1em; }
         .ac-card-actions { display: flex; gap: 4px; align-items: center; }
 
         .ac-empty { padding: 28px; text-align: center; color: var(--theme-text-secondary); }
@@ -228,6 +234,14 @@
         .ac-rule-head .ac-cb { margin: 0 !important; }
         .ac-rule-head .ac-btn { flex: 0 0 auto; }
         .ac-rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0 12px; }
+        .ac-rule-grid-wide { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+        /* A rule's languages: chips, then the pick list to add one */
+        .ac-langs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-height: 32px; }
+        .ac-langs .ac-select { flex: 1 1 90px; }
+        .ac-lang-chip { display: inline-flex; align-items: center; gap: 2px; height: 26px; padding: 0 2px 0 9px; border-radius: 13px; font-size: 0.85em; background: var(--ac-tint-3); border: 1px solid var(--ac-hairline); white-space: nowrap; }
+        .ac-lang-chip button { background: transparent; border: none; color: var(--theme-text-secondary); cursor: pointer; padding: 2px; line-height: 0; border-radius: 50%; }
+        .ac-lang-chip button:hover { color: var(--theme-text-primary); background: var(--ac-tint-2); }
+        .ac-lang-chip .md-icon { font-size: 15px; }
         .ac-rule-summary { font-size: 0.85em; color: var(--theme-text-secondary); margin: 2px 0 8px; }
         .ac-preview { margin-top: 8px; font-size: 0.88em; }
         .ac-preview ol { margin: 6px 0 0; padding-left: 20px; }
@@ -405,6 +419,7 @@
                 <div class="ac-toolbar">
                     <input type="search" class="ac-input" id="acSearch" placeholder="Search titles" />
                     <select class="ac-select" id="acFilterList"><option value="">All lists</option></select>
+                    <select class="ac-select" id="acFilterLang" style="display:none;"><option value="">Any language</option></select>
                     <select class="ac-select" id="acFilterTop" title="Only titles this high on the list">
                         <option value="0">Any place</option>
                         <option value="1">Place 1</option>
@@ -415,6 +430,7 @@
                     </select>
                     <select class="ac-select" id="acSort">
                         <option value="rank">Best place first</option>
+                        <option value="match">Best match</option>
                         <option value="lists">On most lists first</option>
                         <option value="title">Title</option>
                         <option value="year">Newest first</option>
@@ -564,12 +580,15 @@
                     <p>Every title on the file that is not in the library, with its poster and its place on each list ("Trending #1"). Filter by list, top places and All / Movies / Shows, search by title or IMDb id, sort, and switch between the list and posters.</p>
                     <p><em>+ Radarr</em> / <em>+ Sonarr</em> adds a title; <em>✓ Radarr</em> / <em>✓ Sonarr</em> means it is there already (point at it for monitored, downloaded or episodes). <em>In Sonarr / Radarr</em> also shows the titles Sonarr or Radarr has but the library does not have yet; the browser remembers it.</p>
                     <p>Click rows to select them, then <em>Add selected</em> or <em>Hide</em>. Hidden titles are under <em>Show hidden</em>; rules leave them alone. The Add dialog picks the root folder, quality profile, monitoring and search; it starts on the root folder last added to on that server, else the one under Settings.</p>
-                    <p>The tab opens at once with what Sonarr and Radarr held the last time they were read, reads them again meanwhile and updates the rows when they answer.</p>
+                    <p>Each title shows its original language ("Chinese", "Korean"), from TMDb with the poster; point at it for its countries. Filter by language with <em>Any language</em>.</p>
+                    <p><em>Match 82%</em> is how well a title fits what everyone on this server watched in the last 180 days (Emby's played marks of all users, recent plays counting more): its genres, original language, country and main cast and director against those of the watched movies and shows. Point at it for the reason; sort with <em>Best match</em>. It shows once the server has watch history.</p>
+                    <p>The tab opens at once with what Sonarr and Radarr held the last time they were read, reads them again meanwhile and updates the rows when they answer. Languages and match scores are looked up in the background the same way, and kept.</p>
                 </div>
 
                 <div class="ac-help-section"><i class="md-icon">rule</i><span>Rules</span></div>
                 <div class="ac-help-text">
-                    <p>A rule takes a list (or any list), movies, shows or both, the top places, and optionally a first year and a limit per run. <em>Preview</em> shows what it picks, and why it picks nothing. Rules use the root folder and quality profile set under Settings.</p>
+                    <p>A rule takes a list (or any list), movies, shows or both, the top places, and optionally a first year, a limit per run, only these languages, not these languages, and a lowest match. <em>Preview</em> shows what it picks, and why it picks nothing. Rules use the root folder and quality profile set under Settings.</p>
+                    <p>A rule with a language or match condition leaves out titles whose language or match is not known yet.</p>
                     <p>They run on the scheduled task <em>Arr Companion › Run rules</em> (every 6 hours) and, when that is on, a few minutes after the file changes. <em>Save and run now</em> shows what they pick and asks before adding. A title a rule has added once is never added again.</p>
                 </div>
 
@@ -581,7 +600,7 @@
                 <div class="ac-help-section"><i class="md-icon">settings</i><span>Settings</span></div>
                 <div class="ac-help-text">
                     <p><strong>Servers</strong>: Sonarr and Radarr, each with its URL and API key, <em>Test Connection</em>, and the defaults for new titles (root folder, quality profile, monitoring, search). Emby's server talks to Sonarr and Radarr; the API keys never reach the browser.</p>
-                    <p><strong>List &amp; poster settings</strong>: the missing titles file (empty reads Home Screen Companion's file; a file or folder here reads that one instead) and a TMDb key for the posters (empty uses Home Screen Companion's).</p>
+                    <p><strong>List &amp; poster settings</strong>: the missing titles file (empty reads Home Screen Companion's file; a file or folder here reads that one instead) and a TMDb key for the posters and languages (empty uses Home Screen Companion's). Without a TMDb key, Emby's own metadata providers are asked; they give no original language, so it is only known for titles written in their own script (Chinese, Japanese, Korean, Thai, …).</p>
                 </div>
 
                 <div class="ac-help-foot">
