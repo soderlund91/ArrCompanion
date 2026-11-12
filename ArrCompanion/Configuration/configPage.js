@@ -523,8 +523,8 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
                     return '<div class="ac-card' + dim + rowCls + '"' + rowAttrs + '>'
                         + '<div class="ac-cover">' + posterHtml(r)
                         + (rank != null ? '<div class="ac-card-rank' + (rank <= 3 ? ' top' : '') + '">#' + rank + '</div>' : '')
-                        + (check ? '<div class="ac-card-sel">' + check + '</div>' : '')
-                        + (langPill(r) || r.Match != null ? '<div class="ac-card-foot">' + langPill(r) + matchPill(r) + '</div>' : '')
+                        + (selectable ? '<div class="ac-card-sel">' + checkbox('class="acSel emby-checkbox-notext" data-key="' + esc(r.Key) + '"', picked) + '</div>' : '')
+                        + (langPill(r) || r.Match != null ? '<div class="ac-card-foot">' + matchPill(r) + langPill(r) + '</div>' : '')
                         + '</div>'
                         + '<div class="ac-card-title" title="' + esc(r.Title) + '">' + esc(r.Title) + '</div>'
                         + '<div class="ac-card-meta">' + cardMeta.join(' · ') + statusPill(r) + '</div>'
