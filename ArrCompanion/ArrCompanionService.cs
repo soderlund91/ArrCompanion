@@ -56,6 +56,9 @@ namespace ArrCompanion
         // Stored: answer at once with the last Sonarr / Radarr lists kept; Refresh: and read them again meanwhile.
         public bool Stored { get; set; }
         public bool Refresh { get; set; }
+        // Refresh: also look up the titles' details not kept yet, and build the taste profile again when
+        // it is old; Full (the Refresh button): when it is more than a minute old.
+        public bool Full { get; set; }
     }
 
     [Route("/ArrCompanion/Add", "POST")]
@@ -191,8 +194,22 @@ namespace ArrCompanion
             }
         }
 
-        public async Task<object> Get(MissingRequest request) =>
-            await Catalog.BuildAsync(Config, _json, CancellationToken.None, request.Stored, request.Refresh).ConfigureAwait(false);
+        public async Task<object> Get(MissingRequest request)
+        {
+            var config = Config;
+            var result = await Catalog.BuildAsync(config, _json, CancellationToken.None, request.Stored, request.Refresh).ConfigureAwait(false);
+            if (request.Refresh && result.File.Found)
+            {
+                // In the background: the answer is not held up; the page asks again while Enriching.
+                var apiKey = Posters.ApiKey(config);
+                var json = _json;
+                void LookUp(List<MissingList.Title> titles) => Posters.EnrichInBackground(Posters.Unknown(titles, apiKey, json), apiKey, json);
+                LookUp(result.Rows.Select(Catalog.ToTitle).ToList());
+                Taste.RebuildInBackground(json, request.Full ? TimeSpan.FromMinutes(1) : Taste.Stale, LookUp);
+            }
+            result.Enriching = Posters.Enriching || Taste.Building;
+            return result;
+        }
 
         public async Task<object> Post(AddRequest request)
         {

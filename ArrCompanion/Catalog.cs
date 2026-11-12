@@ -40,6 +40,14 @@ namespace ArrCompanion
             public bool ArrDownloaded { get; set; }     // Radarr: the movie has its file
             public int ArrEpisodeFiles { get; set; }    // Sonarr: episodes it has a file of …
             public int ArrEpisodes { get; set; }        // … of its monitored, aired episodes
+            // From the poster lookup (TMDb), once it has been made:
+            public string Language { get; set; } = "";      // original language, ISO 639-1; "" = not known (yet)
+            public string LanguageName { get; set; } = "";  // its English name: "Chinese"
+            public List<string> Countries { get; set; } = new List<string>();   // origin countries, by name
+            public bool HasDetails { get; set; }            // looked up (a language may still be unknown)
+            // How well it matches what the server watched, 0–100; null = not known.
+            public int? Match { get; set; }
+            public string MatchReason { get; set; } = "";
         }
 
         public sealed class Result
@@ -49,6 +57,8 @@ namespace ArrCompanion
             public List<string> Lists { get; set; } = new List<string>();
             public List<string> Errors { get; set; } = new List<string>();   // a server that could not be read
             public bool Refreshing { get; set; }    // built from the last stored Sonarr / Radarr lists; newer ones are being read
+            public bool Enriching { get; set; }     // titles' details or the taste profile are being looked up / built
+            public bool HasMatch { get; set; }      // a taste profile exists: rows carry Match
         }
 
         /// <summary>
@@ -105,6 +115,7 @@ namespace ArrCompanion
                 else if (instance == null) row.Status = Status.NoServer;
                 result.Rows.Add(row);
             }
+            AddDetails(result, json);
             result.Rows = result.Rows.OrderBy(r => r.BestRank ?? int.MaxValue).ThenBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase).ToList();
             return result;
         }
@@ -127,6 +138,24 @@ namespace ArrCompanion
                 // Not reachable now: the last list it gave still tells what it holds.
                 var kept = client.Stored(instance);
                 return (kept != null ? new ArrClient.Holdings(kept) : null, $"{instance.Label} could not be read: {ex.Message}", false);
+            }
+        }
+
+        /// <summary>Language, countries and match from what is kept: nothing is asked here, so the tab stays instant.</summary>
+        private static void AddDetails(Result result, IJsonSerializer json)
+        {
+            var known = Posters.Known(result.Rows.Select(r => r.Key), json);
+            var profile = Taste.Current(json);
+            result.HasMatch = profile != null && profile.Titles > 0;
+            foreach (var row in result.Rows)
+            {
+                if (!known.TryGetValue(row.Key, out var d)) continue;
+                row.HasDetails = true;
+                row.Language = d.Language;
+                row.LanguageName = Languages.Name(d.Language);
+                row.Countries = d.Countries.Select(Languages.CountryName).ToList();
+                var match = Taste.Score(profile, d);
+                if (match != null) { row.Match = match.Score; row.MatchReason = match.Reason; }
             }
         }
 

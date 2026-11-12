@@ -39,9 +39,15 @@ namespace ArrCompanion
             {
                 if (string.IsNullOrWhiteSpace(r.Id)) r.Id = Guid.NewGuid().ToString("N");
                 if (!string.IsNullOrEmpty(r.InstanceId) && Instances.All(i => i.Id != r.InstanceId)) r.InstanceId = "";
+                r.Languages = Codes(r.Languages);
+                r.ExcludeLanguages = Codes(r.ExcludeLanguages);
+                r.MinMatch = Math.Max(0, Math.Min(100, r.MinMatch));
             }
             Ignored = Ignored.Where(k => !string.IsNullOrWhiteSpace(k)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         }
+
+        private static List<string> Codes(List<string>? codes) =>
+            (codes ?? new List<string>()).Select(ArrCompanion.Languages.Code).Where(c => c.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
         /// <summary>The server for a kind: the one asked for, else the first of that kind that is set up.</summary>
         internal ArrInstance? InstanceFor(string kind, string? instanceId = null)
@@ -109,5 +115,10 @@ namespace ArrCompanion
         public int MinYear { get; set; }                // 0 = any year
         public int MaxPerRun { get; set; }              // 0 = no limit
         public string InstanceId { get; set; } = "";    // "" = the first server of the kind
+        public List<string> Languages { get; set; } = new List<string>();         // only these original languages (ISO 639-1); empty = any
+        public List<string> ExcludeLanguages { get; set; } = new List<string>();  // never these
+        public int MinMatch { get; set; }               // match with the server's watching at least this (0-100); 0 = any
+
+        internal bool UsesDetails => (Languages?.Count ?? 0) > 0 || (ExcludeLanguages?.Count ?? 0) > 0 || MinMatch > 0;
     }
 }

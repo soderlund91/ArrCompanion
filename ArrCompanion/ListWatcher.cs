@@ -1,4 +1,6 @@
 using MediaBrowser.Common;
+using MediaBrowser.Controller.Configuration;
+using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Plugins;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Serialization;
@@ -26,11 +28,14 @@ namespace ArrCompanion
         private Timer? _startTimer;
         private Timer? _timer;
 
-        public ListWatcher(IApplicationHost appHost, IJsonSerializer json, ILogManager logManager)
+        public ListWatcher(IApplicationHost appHost, IJsonSerializer json, ILogManager logManager, IServerConfigurationManager serverConfig,
+            ILibraryManager libraryManager, IUserManager userManager, IUserDataManager userDataManager)
         {
             _json = json;
             Log.Initialize(logManager);
             MissingList.Initialize(appHost);
+            Posters.Initialize(appHost, serverConfig);
+            Taste.Initialize(libraryManager, userManager, userDataManager);
         }
 
         public void Run()

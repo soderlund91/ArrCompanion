@@ -28,6 +28,8 @@ namespace ArrCompanion
             public int? Rank { get; set; }
             public string InstanceId { get; set; } = "";
             public string InstanceName { get; set; } = "";
+            public string LanguageName { get; set; } = "";
+            public int? Match { get; set; }
             // After a run:
             public bool Done { get; set; }
             public bool Success { get; set; }
@@ -50,13 +52,34 @@ namespace ArrCompanion
         {
             var what = r.MediaType == MediaType.Movie ? "movies" : r.MediaType == MediaType.Show ? "shows" : "titles";
             var where = string.IsNullOrWhiteSpace(r.List) ? "any list" : r.List.Trim();
-            return (r.TopN > 0 ? $"Top {r.TopN} {what} of {where}" : $"All {what} on {where}") + (r.MinYear > 0 ? $" from {r.MinYear}" : "");
+            return (r.TopN > 0 ? $"Top {r.TopN} {what} of {where}" : $"All {what} on {where}") + (r.MinYear > 0 ? $" from {r.MinYear}" : "")
+                + ((r.Languages?.Count ?? 0) > 0 ? " in " + Names(r.Languages!) : "")
+                + ((r.ExcludeLanguages?.Count ?? 0) > 0 ? " not in " + Names(r.ExcludeLanguages!) : "")
+                + (r.MinMatch > 0 ? $", match at least {r.MinMatch}%" : "");
+        }
+
+        private static string Names(List<string> codes) => string.Join(", ", codes.Select(Languages.Name));
+
+        private static bool Has(List<string>? codes, string code) =>
+            code.Length > 0 && (codes ?? new List<string>()).Any(c => string.Equals(Languages.Code(c), code, StringComparison.OrdinalIgnoreCase));
+
+        // The conditions on what the lookup gives: language and match. A title not looked up yet, or
+        // whose language is not known, is not picked by a rule that asks for one.
+        private static bool DetailsAllow(ArrRule rule, Catalog.Row row)
+        {
+            if (!rule.UsesDetails) return true;
+            if (!row.HasDetails) return false;
+            if ((rule.Languages?.Count ?? 0) > 0 && !Has(rule.Languages, row.Language)) return false;
+            if ((rule.ExcludeLanguages?.Count ?? 0) > 0 && (row.Language.Length == 0 || Has(rule.ExcludeLanguages, row.Language))) return false;
+            if (rule.MinMatch > 0 && (row.Match == null || row.Match < rule.MinMatch)) return false;
+            return true;
         }
 
         private static MissingList.Place? Matches(ArrRule rule, Catalog.Row row)
         {
             if (!string.IsNullOrEmpty(rule.MediaType) && rule.MediaType != row.Type) return null;
             if (rule.MinYear > 0 && (row.Year == null || row.Year < rule.MinYear)) return null;
+            if (!DetailsAllow(rule, row)) return null;
             var places = row.Places.Where(p => string.IsNullOrWhiteSpace(rule.List) || string.Equals(p.List, rule.List.Trim(), StringComparison.OrdinalIgnoreCase));
             if (rule.TopN > 0) places = places.Where(p => p.Rank != null && p.Rank <= rule.TopN);
             return places.OrderBy(p => p.Rank ?? int.MaxValue).FirstOrDefault();
@@ -81,6 +104,19 @@ namespace ArrCompanion
             Step(r => taken.Contains(r.Key), "are picked by an earlier rule");
             Step(r => !string.IsNullOrEmpty(rule.MediaType) && rule.MediaType != r.Type, rule.MediaType == MediaType.Show ? "are movies" : "are shows");
             Step(r => rule.MinYear > 0 && (r.Year == null || r.Year < rule.MinYear), $"are from before {rule.MinYear} (or have no year)");
+            if (rule.UsesDetails)
+            {
+                Step(r => !r.HasDetails, "have no language or match looked up yet");
+                bool asksLanguage = (rule.Languages?.Count ?? 0) > 0 || (rule.ExcludeLanguages?.Count ?? 0) > 0;
+                if (asksLanguage) Step(r => r.Language.Length == 0, "have no known language");
+                if ((rule.Languages?.Count ?? 0) > 0) Step(r => !Has(rule.Languages, r.Language), "are not in " + Names(rule.Languages!));
+                if ((rule.ExcludeLanguages?.Count ?? 0) > 0) Step(r => Has(rule.ExcludeLanguages, r.Language), "are in " + Names(rule.ExcludeLanguages!));
+                if (rule.MinMatch > 0)
+                {
+                    Step(r => r.Match == null, "have no match score yet");
+                    Step(r => r.Match < rule.MinMatch, $"match less than {rule.MinMatch}%");
+                }
+            }
             Step(r => r.Places.Count == 0, "are on no list in the file");
             if (!string.IsNullOrWhiteSpace(rule.List))
                 Step(r => !r.Places.Any(p => string.Equals(p.List, rule.List.Trim(), StringComparison.OrdinalIgnoreCase)), $"are not on {rule.List.Trim()}");
@@ -132,7 +168,8 @@ namespace ArrCompanion
                     outcome.Picks.Add(new Pick
                     {
                         RuleId = rule.Id, RuleName = label, Key = row.Key, Title = row.Title, Year = row.Year, Type = row.Type,
-                        List = place!.List, Rank = place.Rank, InstanceId = instance?.Id ?? "", InstanceName = instance?.Label ?? ArrKind.Label(kind), Row = row
+                        List = place!.List, Rank = place.Rank, InstanceId = instance?.Id ?? "", InstanceName = instance?.Label ?? ArrKind.Label(kind), Row = row,
+                        LanguageName = row.LanguageName, Match = row.Match
                     });
                 }
                 if (count == 0)
@@ -144,6 +181,19 @@ namespace ArrCompanion
             }
             if (unreadable) outcome.Notes.AddRange(catalog.Errors);
             return outcome;
+        }
+
+        private static async Task DetailsAsync(PluginConfiguration config, IJsonSerializer json, List<ArrRule> rules, CancellationToken ct)
+        {
+            var apiKey = Posters.ApiKey(config);
+            var titles = Posters.Unknown(MissingList.Read(config, json).Titles, apiKey, json);
+            if (titles.Count > 0)
+            {
+                // One lookup at a time: a background one already running is waited for, then the rest asked.
+                while (Posters.Enriching && !ct.IsCancellationRequested) await Task.Delay(500, ct).ConfigureAwait(false);
+                await Posters.PathsAsync(Posters.Unknown(titles, apiKey, json), apiKey, json, ct).ConfigureAwait(false);
+            }
+            if (rules.Any(r => r.MinMatch > 0)) await Taste.EnsureAsync(json, Taste.Stale, ct).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -160,6 +210,8 @@ namespace ArrCompanion
                 return new Outcome { Message = "The rules are already running." };
             try
             {
+                // A rule on language or match: the titles' details and the taste profile first (a preview uses what is kept).
+                if (!dryRun && rules.Any(r => r.UsesDetails)) await DetailsAsync(config, json, rules, ct).ConfigureAwait(false);
                 var catalog = await Catalog.BuildAsync(config, json, ct).ConfigureAwait(false);
                 if (!catalog.File.Found) return new Outcome { Message = catalog.File.Problem ?? "No missing titles file." };
                 var outcome = Picks(config, catalog, rules);
