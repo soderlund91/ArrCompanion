@@ -27,6 +27,9 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         showInArr: false,  // also the titles Sonarr / Radarr already have
         hiddenView: false, // Show hidden: only the hidden titles
         view: 'list',      // 'list' | 'posters'
+        shown: [],         // the rows the filters let through, in their order (also the ones not drawn yet)
+        rendered: 0,       // how many of them are drawn
+        rowSigs: {},       // key -> rowSig of the drawn row
         loads: 0,          // GET ArrCompanion/Missing asked so far; an older answer is dropped
         folds: {},         // Settings panels the user opened or closed: data-fold -> open
         languages: null    // GET ArrCompanion/Languages: [{ Code, Name }]
@@ -201,9 +204,8 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             var keys = {};
             (res.Rows || []).forEach(function (r) { keys[r.Key] = true; });
             Object.keys(state.selected).forEach(function (k) { if (!keys[k]) delete state.selected[k]; });
-            fillListFilter(view);
-            fillLangFilter(view);
-            renderMissing(view);
+            fillFilters(view);
+            updateMissing(view);
             fileFolds(view);
             view.querySelector('#acRefresh').classList.toggle('ac-refreshing', !!res.Refreshing);
             return true;
@@ -240,7 +242,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
     // "Any language" and the languages of the titles, with how many each has.
     function fillLangFilter(view) {
         var sel = view.querySelector('#acFilterLang');
-        if (sel === document.activeElement) return;   // open or in use: left as it is
+        if (sel === document.activeElement) { state.filtersStale = true; return; }   // open or in use: left as it is
         var current = sel.value;
         var counts = {}, names = {}, unknown = 0;
         ((state.catalog && state.catalog.Rows) || []).forEach(function (r) {
@@ -260,6 +262,14 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         sel.style.display = codes.length ? '' : 'none';
     }
 
+    // The filters' choices and counts: once per data change. A filter in use (open or focused) is
+    // left as it is and filled once it is left.
+    function fillFilters(view) {
+        state.filtersStale = false;
+        fillListFilter(view);
+        fillLangFilter(view);
+    }
+
     // The languages the page knows a name for: the titles', and any a rule names.
     // all: every language the server has a name for (Settings › Your languages).
     function langNames(all) {
@@ -271,7 +281,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
 
     function fillListFilter(view) {
         var sel = view.querySelector('#acFilterList');
-        if (sel === document.activeElement) return;
+        if (sel === document.activeElement) { state.filtersStale = true; return; }
         var current = sel.value;
         var lists = (state.catalog && state.catalog.Lists) || [];
         var counts = {};
@@ -451,11 +461,13 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
     function posterHtml(row) {
         var url = state.posters[row.Key];
         return '<div class="ac-poster" data-poster-key="' + esc(row.Key) + '">'
-            + (url ? '<img loading="lazy" alt="" src="' + esc(url) + '" />' : '<i class="md-icon">' + (row.Type === 'show' ? 'tv' : 'movie') + '</i>')
+            + (url ? posterImg(url) : '<i class="md-icon">' + (row.Type === 'show' ? 'tv' : 'movie') + '</i>')
             + '</div>';
     }
 
-    // Posters of the rows shown that are not known yet, 100 at a time.
+    function posterImg(url) { return '<img loading="lazy" decoding="async" alt="" src="' + esc(url) + '" />'; }
+
+    // Posters of the drawn rows that are not known yet, 100 at a time.
     function loadPosters(view, rows) {
         if (state.noTmdbKey) return;
         var keys = rows.map(function (r) { return r.Key; })
@@ -465,12 +477,11 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         batch.forEach(function (k) { state.posterAsked[k] = true; });
         api('ArrCompanion/Posters', 'POST', { Keys: batch }).then(function (res) {
             if (res && !res.HasKey) state.noTmdbKey = true;
+            var els = {};
+            view.querySelectorAll('#acMissingList [data-poster-key]').forEach(function (el) { els[el.getAttribute('data-poster-key')] = el; });
             ((res && res.Posters) || []).forEach(function (p) {
                 state.posters[p.Key] = p.Url || '';
-                if (!p.Url) return;
-                view.querySelectorAll('[data-poster-key]').forEach(function (el) {
-                    if (el.getAttribute('data-poster-key') === p.Key) el.innerHTML = '<img loading="lazy" alt="" src="' + esc(p.Url) + '" />';
-                });
+                if (p.Url && els[p.Key]) els[p.Key].innerHTML = posterImg(p.Url);
             });
             batch.forEach(function (k) { delete state.posterAsked[k]; if (!(k in state.posters)) state.posters[k] = ''; });
             if (keys.length > batch.length) loadPosters(view, rows);
@@ -492,63 +503,149 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         return '';
     }
 
-    function renderMissing(view) {
+    // One title as a list row or a poster card.
+    function rowHtml(r, grid, list) {
+        var selectable = isOpen(r) || r.Status === 'ignored';
+        var picked = selectable && state.selected[r.Key];
+        var check = selectable ? checkbox('class="acSel" data-key="' + esc(r.Key) + '"', picked) : '';
+        var rowAttrs = ' data-key="' + esc(r.Key) + '"';
+        var rowCls = (selectable ? ' selectable' : '') + (picked ? ' selected' : '');
+        var ignoreBtn = '<button type="button" class="ac-btn small ghost" data-action="ignore" data-key="' + esc(r.Key) + '" title="Hide: not shown as missing, and no rule adds it. Hidden titles are under Show hidden."><i class="md-icon">visibility_off</i></button>';
+        var unignoreBtn = '<button type="button" class="ac-btn small ghost" data-action="unignore" data-key="' + esc(r.Key) + '" title="Show it again"><i class="md-icon">visibility</i>' + (grid ? '' : 'Unhide') + '</button>';
+        var actions = arrPill(r) + (isOpen(r) ? ignoreBtn : r.Status === 'ignored' ? unignoreBtn : '');
+        var dim = r.Status === 'inArr' || r.Status === 'ignored' ? ' dim' : '';
+        var best = bestPlace(r, list);
+        var rank = best && best.Rank != null ? best.Rank : null;
+        if (grid) {
+            var cardMeta = [];
+            if (r.Year) cardMeta.push(r.Year);
+            cardMeta.push(esc((r.Places || []).map(function (p) { return p.List; }).join(', ')));
+            return '<div class="ac-card' + dim + rowCls + '"' + rowAttrs + '>'
+                + '<div class="ac-cover">' + posterHtml(r)
+                + (rank != null ? '<div class="ac-card-rank' + (rank <= 3 ? ' top' : '') + '">#' + rank + '</div>' : '')
+                + (selectable ? '<div class="ac-card-sel">' + checkbox('class="acSel emby-checkbox-notext" data-key="' + esc(r.Key) + '"', picked) + '</div>' : '')
+                + (langPill(r) || r.Match != null ? '<div class="ac-card-foot">' + matchPill(r) + langPill(r) + '</div>' : '')
+                + '</div>'
+                + '<div class="ac-card-title" title="' + esc(r.Title) + '">' + esc(r.Title) + '</div>'
+                + '<div class="ac-card-meta">' + cardMeta.join(' · ') + statusPill(r) + '</div>'
+                + (actions ? '<div class="ac-card-actions">' + actions + '</div>' : '')
+                + '</div>';
+        }
+        var meta = [];
+        if (r.Year) meta.push(r.Year);
+        meta.push(r.Type === 'show' ? 'Series' : 'Movie');
+        if (r.Imdb) meta.push(imdbLink(r));
+        return '<div class="ac-item' + dim + rowCls + '"' + rowAttrs + '>'
+            + '<div class="ac-item-check">' + check + '</div>'
+            + '<div class="ac-rank-col">' + (rank != null ? rank : '') + '</div>'
+            + posterHtml(r)
+            + '<div class="ac-item-info">'
+            + '<div class="ac-item-title">' + esc(r.Title) + '</div>'
+            + '<div class="ac-item-meta"><span>' + meta.join(' · ') + '</span>' + langPill(r) + matchPill(r) + statusPill(r) + '</div>'
+            + placeTags(r, list)
+            + '</div>'
+            + '<div class="ac-item-actions">' + actions + '</div>'
+            + '</div>';
+    }
+
+    // What a drawn row shows that a poll can change; a row is only drawn again when this changes.
+    function rowSig(r) {
+        return [r.Status, r.Language, r.LanguageName, (r.Countries || []).join(','), r.HasDetails, r.Match, r.MatchReason, r.AddedBefore,
+            r.ArrMonitored, r.ArrDownloaded, r.ArrEpisodes, r.ArrEpisodeFiles, r.Title, r.Year,
+            (r.Places || []).map(function (p) { return p.List + '#' + p.Rank + '/' + p.Of; }).join(',')].join('|');
+    }
+
+    // The rows are drawn a part at a time: the first ones at once, the next ones as the end comes into view.
+    var CHUNK = 60;
+
+    // The whole tab drawn again. keep: as many rows as are drawn now (a data update; the scroll stays where it was).
+    function renderMissing(view, keep) {
         renderBanner(view);
-        renderTypeChips(view);
-        var listEl = view.querySelector('#acMissingList');
         var rows = visibleRows(view);
+        renderTypeChips(view, rows);
+        var listEl = view.querySelector('#acMissingList');
         var list = view.querySelector('#acFilterList').value;
+        var grid = state.view === 'posters';
+        if (state.moreObserver) { state.moreObserver.disconnect(); state.moreObserver = null; }
+        state.shown = rows;
+        state.rowSigs = {};
         if (!rows.length) {
             var none = state.catalog && state.catalog.File && state.catalog.File.Found ? 'Nothing matches.' : 'No titles yet.';
             listEl.innerHTML = '<div class="ac-empty">' + none + '</div>';
+            state.rendered = 0;
+            state.shownOrder = '';
         } else {
-            var grid = state.view === 'posters';
             var hasRank = rows.some(function (r) { var p = bestPlace(r, list); return p && p.Rank != null; });
-            listEl.innerHTML = '<div class="' + (grid ? 'ac-grid-view' : 'ac-list') + (hasRank ? '' : ' ac-norank') + '">' + rows.map(function (r) {
-                var selectable = isOpen(r) || r.Status === 'ignored';
-                var picked = selectable && state.selected[r.Key];
-                var check = selectable ? checkbox('class="acSel" data-key="' + esc(r.Key) + '"', picked) : '';
-                var rowAttrs = ' data-key="' + esc(r.Key) + '"';
-                var rowCls = (selectable ? ' selectable' : '') + (picked ? ' selected' : '');
-                var ignoreBtn = '<button type="button" class="ac-btn small ghost" data-action="ignore" data-key="' + esc(r.Key) + '" title="Hide: not shown as missing, and no rule adds it. Hidden titles are under Show hidden."><i class="md-icon">visibility_off</i></button>';
-                var unignoreBtn = '<button type="button" class="ac-btn small ghost" data-action="unignore" data-key="' + esc(r.Key) + '" title="Show it again"><i class="md-icon">visibility</i>' + (grid ? '' : 'Unhide') + '</button>';
-                var actions = arrPill(r) + (isOpen(r) ? ignoreBtn : r.Status === 'ignored' ? unignoreBtn : '');
-                var dim = r.Status === 'inArr' || r.Status === 'ignored' ? ' dim' : '';
-                var best = bestPlace(r, list);
-                var rank = best && best.Rank != null ? best.Rank : null;
-                if (grid) {
-                    var cardMeta = [];
-                    if (r.Year) cardMeta.push(r.Year);
-                    cardMeta.push(esc((r.Places || []).map(function (p) { return p.List; }).join(', ')));
-                    return '<div class="ac-card' + dim + rowCls + '"' + rowAttrs + '>'
-                        + '<div class="ac-cover">' + posterHtml(r)
-                        + (rank != null ? '<div class="ac-card-rank' + (rank <= 3 ? ' top' : '') + '">#' + rank + '</div>' : '')
-                        + (selectable ? '<div class="ac-card-sel">' + checkbox('class="acSel emby-checkbox-notext" data-key="' + esc(r.Key) + '"', picked) + '</div>' : '')
-                        + (langPill(r) || r.Match != null ? '<div class="ac-card-foot">' + matchPill(r) + langPill(r) + '</div>' : '')
-                        + '</div>'
-                        + '<div class="ac-card-title" title="' + esc(r.Title) + '">' + esc(r.Title) + '</div>'
-                        + '<div class="ac-card-meta">' + cardMeta.join(' · ') + statusPill(r) + '</div>'
-                        + (actions ? '<div class="ac-card-actions">' + actions + '</div>' : '')
-                        + '</div>';
-                }
-                var meta = [];
-                if (r.Year) meta.push(r.Year);
-                meta.push(r.Type === 'show' ? 'Series' : 'Movie');
-                if (r.Imdb) meta.push(imdbLink(r));
-                return '<div class="ac-item' + dim + rowCls + '"' + rowAttrs + '>'
-                    + '<div class="ac-item-check">' + check + '</div>'
-                    + '<div class="ac-rank-col">' + (rank != null ? rank : '') + '</div>'
-                    + posterHtml(r)
-                    + '<div class="ac-item-info">'
-                    + '<div class="ac-item-title">' + esc(r.Title) + '</div>'
-                    + '<div class="ac-item-meta"><span>' + meta.join(' · ') + '</span>' + langPill(r) + matchPill(r) + statusPill(r) + '</div>'
-                    + placeTags(r, list)
-                    + '</div>'
-                    + '<div class="ac-item-actions">' + actions + '</div>'
-                    + '</div>';
-            }).join('') + '</div>';
-            loadPosters(view, rows);
+            var n = Math.min(rows.length, keep ? Math.max(CHUNK, state.rendered || 0) : CHUNK);
+            var part = rows.slice(0, n);
+            listEl.innerHTML = '<div class="' + (grid ? 'ac-grid-view' : 'ac-list') + (hasRank ? '' : ' ac-norank') + '">'
+                + part.map(function (r) { state.rowSigs[r.Key] = rowSig(r); return rowHtml(r, grid, list); }).join('') + '</div>'
+                + '<div class="ac-more"></div>';
+            state.rendered = n;
+            state.shownOrder = orderOf(rows, grid, hasRank, list);
+            loadPosters(view, part);
+            watchMore(view);
         }
+        updateBulk(view, rows);
+    }
+
+    // The drawn rows' order and look: the same means a poll can patch rows in place.
+    function orderOf(rows, grid, hasRank, list) {
+        return (grid ? 'g' : 'l') + (hasRank ? 'r' : '') + '|' + list + '|' + rows.map(function (r) { return r.Key; }).join(',');
+    }
+
+    // The next rows once the end of the drawn ones comes near.
+    function watchMore(view) {
+        var sentinel = view.querySelector('#acMissingList .ac-more');
+        if (!sentinel || state.rendered >= (state.shown || []).length || !window.IntersectionObserver) {
+            if (sentinel && !window.IntersectionObserver) drawMore(view, (state.shown || []).length);
+            return;
+        }
+        var io = new IntersectionObserver(function (entries) {
+            if (!entries.some(function (e) { return e.isIntersecting; })) return;
+            io.disconnect();
+            if (state.moreObserver !== io) return;
+            state.moreObserver = null;
+            drawMore(view, CHUNK);
+            watchMore(view);   // observed again: called at once if the end is still near
+        }, { rootMargin: '0px 0px 800px 0px' });
+        io.observe(sentinel);
+        state.moreObserver = io;
+    }
+
+    function drawMore(view, count) {
+        var box = view.querySelector('#acMissingList > .ac-list, #acMissingList > .ac-grid-view');
+        var rows = state.shown || [];
+        if (!box || state.rendered >= rows.length) return;
+        var list = view.querySelector('#acFilterList').value;
+        var grid = state.view === 'posters';
+        var part = rows.slice(state.rendered, state.rendered + count);
+        box.insertAdjacentHTML('beforeend', part.map(function (r) { state.rowSigs[r.Key] = rowSig(r); return rowHtml(r, grid, list); }).join(''));
+        state.rendered += part.length;
+        loadPosters(view, part);
+    }
+
+    // New data (a poll, the lists read again, an add or hide): when the same rows are shown in the same
+    // order, only the drawn rows whose details changed are drawn again; else the tab is drawn again.
+    function updateMissing(view) {
+        var box = view.querySelector('#acMissingList > .ac-list, #acMissingList > .ac-grid-view');
+        var rows = visibleRows(view);
+        var list = view.querySelector('#acFilterList').value;
+        var grid = state.view === 'posters';
+        var hasRank = rows.some(function (r) { var p = bestPlace(r, list); return p && p.Rank != null; });
+        if (!box || !rows.length || orderOf(rows, grid, hasRank, list) !== state.shownOrder || box.children.length !== state.rendered) {
+            renderMissing(view, true);
+            return;
+        }
+        state.shown = rows;
+        for (var i = 0; i < state.rendered; i++) {
+            var r = rows[i], sig = rowSig(r);
+            if (state.rowSigs[r.Key] === sig) continue;
+            state.rowSigs[r.Key] = sig;
+            box.children[i].outerHTML = rowHtml(r, grid, list);
+        }
+        renderBanner(view);
+        renderTypeChips(view, rows);
         updateBulk(view, rows);
     }
 
@@ -1132,8 +1229,18 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         });
 
         // Missing
-        ['#acSearch', '#acFilterList', '#acFilterLang', '#acFilterTop', '#acSort'].forEach(function (sel) {
-            view.querySelector(sel).addEventListener(sel === '#acSearch' ? 'input' : 'change', function () { renderMissing(view); });
+        ['#acFilterList', '#acFilterLang', '#acFilterTop', '#acSort'].forEach(function (sel) {
+            view.querySelector(sel).addEventListener('change', function () { renderMissing(view); });
+        });
+        // Typing: drawn once the typing pauses.
+        var searchTimer = null;
+        view.querySelector('#acSearch').addEventListener('input', function () {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(function () { renderMissing(view); }, 150);
+        });
+        // A filter left while new data came in: its choices and counts are filled now.
+        view.querySelector('.ac-toolbar').addEventListener('focusout', function () {
+            setTimeout(function () { if (state.filtersStale && state.catalog) fillFilters(view); }, 0);
         });
         view.querySelector('#acTypeChips').addEventListener('click', function (e) {
             var chip = e.target.closest('[data-type]');
@@ -1183,12 +1290,20 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             else if (action === 'ignore') ignore(view, [key], true);
             else if (action === 'unignore') ignore(view, [key], false);
         });
+        // Every title the filters let through, also the ones not drawn yet; only the drawn rows' boxes change.
         view.querySelector('#acSelectAll').addEventListener('change', function (e) {
+            var on = e.target.checked;
             visibleRows(view).forEach(function (r) {
                 if (!isOpen(r) && r.Status !== 'ignored') return;
-                if (e.target.checked) state.selected[r.Key] = true; else delete state.selected[r.Key];
+                if (on) state.selected[r.Key] = true; else delete state.selected[r.Key];
             });
-            renderMissing(view);
+            view.querySelectorAll('#acMissingList [data-key].selectable').forEach(function (row) {
+                var picked = !!state.selected[row.getAttribute('data-key')];
+                row.classList.toggle('selected', picked);
+                var cb = row.querySelector('.acSel');
+                if (cb && cb.checked !== picked) cb.checked = picked;
+            });
+            updateBulk(view);
         });
         view.querySelector('#acAddSelected').addEventListener('click', function () { openAddDialog(view, selectedKeys()); });
         view.querySelector('#acIgnoreSelected').addEventListener('click', function () {
