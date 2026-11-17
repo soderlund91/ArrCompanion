@@ -215,8 +215,9 @@ namespace ArrCompanion
                 void LookUp(List<MissingList.Title> titles) => Posters.EnrichInBackground(Posters.Unknown(titles, apiKey, json), apiKey, json);
                 LookUp(result.Rows.Select(Catalog.ToTitle).ToList());
                 Taste.RebuildInBackground(json, request.Full ? TimeSpan.FromMinutes(1) : Taste.Stale, LookUp);
+                Ratings.RefreshInBackground(result.Rows.Select(r => r.Imdb), json);
             }
-            result.Enriching = Posters.Enriching || Taste.Building;
+            result.Enriching = Posters.Enriching || Taste.Building || Ratings.Running;
             return result;
         }
 

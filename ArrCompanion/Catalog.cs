@@ -48,6 +48,13 @@ namespace ArrCompanion
             // How well it matches what the server watched, 0–100; null = not known.
             public int? Match { get; set; }
             public string MatchReason { get; set; } = "";
+            // From MDBList (Home Screen Companion's key), once looked up; null = not known.
+            public double? RatingImdb { get; set; }
+            public int? RatingRt { get; set; }
+            public int? RatingRtAudience { get; set; }
+            public int? RatingMetacritic { get; set; }
+            public double? RatingLetterboxd { get; set; }
+            public int? RatingScore { get; set; }
         }
 
         public sealed class Result
@@ -59,6 +66,7 @@ namespace ArrCompanion
             public bool Refreshing { get; set; }    // built from the last stored Sonarr / Radarr lists; newer ones are being read
             public bool Enriching { get; set; }     // titles' details or the taste profile are being looked up / built
             public bool HasMatch { get; set; }      // a taste profile exists: rows carry Match
+            public bool HasRatings { get; set; }    // an MDBList key, and rows carry ratings
         }
 
         /// <summary>
@@ -141,7 +149,7 @@ namespace ArrCompanion
             }
         }
 
-        /// <summary>Language, countries and match from what is kept: nothing is asked here, so the tab stays instant.</summary>
+        /// <summary>Language, countries, match and ratings from what is kept: nothing is asked here, so the tab stays instant.</summary>
         private static void AddDetails(Result result, IJsonSerializer json)
         {
             var known = Posters.Known(result.Rows.Select(r => r.Key), json);
@@ -156,6 +164,19 @@ namespace ArrCompanion
                 row.Countries = d.Countries.Select(Languages.CountryName).ToList();
                 var match = Taste.Score(profile, d);
                 if (match != null) { row.Match = match.Score; row.MatchReason = match.Reason; }
+            }
+            if (Ratings.ApiKey().Length == 0) return;
+            var rated = Ratings.Known(result.Rows.Select(r => r.Imdb), json);
+            foreach (var row in result.Rows)
+            {
+                if (!rated.TryGetValue(row.Imdb.Trim().ToLowerInvariant(), out var r)) continue;
+                row.RatingImdb = r.ImdbRating;
+                row.RatingRt = r.Tomatoes;
+                row.RatingRtAudience = r.Popcorn;
+                row.RatingMetacritic = r.Metacritic;
+                row.RatingLetterboxd = r.Letterboxd;
+                row.RatingScore = r.Score;
+                result.HasRatings = true;
             }
         }
 

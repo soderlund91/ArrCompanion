@@ -30,6 +30,8 @@ namespace ArrCompanion
             public string InstanceName { get; set; } = "";
             public string LanguageName { get; set; } = "";
             public int? Match { get; set; }
+            public double? RatingImdb { get; set; }
+            public int? RatingRt { get; set; }
             // After a run:
             public bool Done { get; set; }
             public bool Success { get; set; }
@@ -56,7 +58,9 @@ namespace ArrCompanion
                 + ((r.Languages?.Count ?? 0) > 0 ? " in " + Names(r.Languages!) : "")
                 + ((r.ExcludeLanguages?.Count ?? 0) > 0 ? " not in " + Names(r.ExcludeLanguages!) : "")
                 + (r.MyLanguagesMode == ArrRule.Mine.Only ? " in your languages" : r.MyLanguagesMode == ArrRule.Mine.Not ? " not in your languages" : "")
-                + (r.MinMatch > 0 ? $", match at least {r.MinMatch}%" : "");
+                + (r.MinMatch > 0 ? $", match at least {r.MinMatch}%" : "")
+                + (r.MinImdb > 0 ? ", IMDb at least " + r.MinImdb.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) : "")
+                + (r.MinRt > 0 ? $", Rotten Tomatoes at least {r.MinRt}%" : "");
         }
 
         private static string Names(List<string> codes) => string.Join(", ", codes.Select(Languages.Name));
@@ -76,11 +80,17 @@ namespace ArrCompanion
             return true;
         }
 
+        // The ratings' minimums: a title without that rating does not pass one.
+        private static bool RatingsAllow(ArrRule rule, Catalog.Row row) =>
+            (rule.MinImdb <= 0 || (row.RatingImdb != null && row.RatingImdb >= rule.MinImdb))
+            && (rule.MinRt <= 0 || (row.RatingRt != null && row.RatingRt >= rule.MinRt));
+
         private static MissingList.Place? Matches(ArrRule rule, Catalog.Row row)
         {
             if (!string.IsNullOrEmpty(rule.MediaType) && rule.MediaType != row.Type) return null;
             if (rule.MinYear > 0 && (row.Year == null || row.Year < rule.MinYear)) return null;
             if (!DetailsAllow(rule, row)) return null;
+            if (!RatingsAllow(rule, row)) return null;
             var places = row.Places.Where(p => string.IsNullOrWhiteSpace(rule.List) || string.Equals(p.List, rule.List.Trim(), StringComparison.OrdinalIgnoreCase));
             if (rule.TopN > 0) places = places.Where(p => p.Rank != null && p.Rank <= rule.TopN);
             return places.OrderBy(p => p.Rank ?? int.MaxValue).FirstOrDefault();
@@ -117,6 +127,16 @@ namespace ArrCompanion
                     Step(r => r.Match == null, "have no match score yet");
                     Step(r => r.Match < rule.MinMatch, $"match less than {rule.MinMatch}%");
                 }
+            }
+            if (rule.MinImdb > 0)
+            {
+                Step(r => r.RatingImdb == null, "have no IMDb rating");
+                Step(r => r.RatingImdb < rule.MinImdb, "are rated under " + rule.MinImdb.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " on IMDb");
+            }
+            if (rule.MinRt > 0)
+            {
+                Step(r => r.RatingRt == null, "have no Rotten Tomatoes score");
+                Step(r => r.RatingRt < rule.MinRt, $"are under {rule.MinRt}% on Rotten Tomatoes");
             }
             Step(r => r.Places.Count == 0, "are on no list in the file");
             if (!string.IsNullOrWhiteSpace(rule.List))
@@ -172,7 +192,7 @@ namespace ArrCompanion
                     {
                         RuleId = rule.Id, RuleName = label, Key = row.Key, Title = row.Title, Year = row.Year, Type = row.Type,
                         List = place!.List, Rank = place.Rank, InstanceId = instance?.Id ?? "", InstanceName = instance?.Label ?? ArrKind.Label(kind), Row = row,
-                        LanguageName = row.LanguageName, Match = row.Match
+                        LanguageName = row.LanguageName, Match = row.Match, RatingImdb = row.RatingImdb, RatingRt = row.RatingRt
                     });
                 }
                 if (count == 0)
@@ -215,6 +235,9 @@ namespace ArrCompanion
             {
                 // A rule on language or match: the titles' details and the taste profile first (a preview uses what is kept).
                 if (!dryRun && rules.Any(r => r.UsesDetails)) await DetailsAsync(config, json, rules, ct).ConfigureAwait(false);
+                // A rule on ratings: the ratings not kept yet.
+                if (!dryRun && rules.Any(r => r.UsesRatings))
+                    await Ratings.EnsureAsync(MissingList.Read(config, json).Titles.Select(t => t.Imdb), json, ct).ConfigureAwait(false);
                 var catalog = await Catalog.BuildAsync(config, json, ct).ConfigureAwait(false);
                 if (!catalog.File.Found) return new Outcome { Message = catalog.File.Problem ?? "No missing titles file." };
                 var outcome = Picks(config, catalog, rules);

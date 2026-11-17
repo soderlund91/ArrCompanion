@@ -97,6 +97,7 @@ namespace ArrCompanion
             public string Folder = "";
             public string SourcesPath = "";   // what each list held, in its order (missing_titles/sources.json)
             public string TmdbApiKey = "";
+            public string MdblistApiKey = "";
             public bool On;     // its Missing tab with "Keep the list in a file" and JSON on
         }
 
@@ -116,6 +117,7 @@ namespace ArrCompanion
                 var folder = config.GetType().GetProperty("MissingExportFolder")?.GetValue(config) as string;
                 if (!string.IsNullOrWhiteSpace(folder)) result.Folder = folder!.Trim();
                 result.TmdbApiKey = ((config.GetType().GetProperty("TmdbApiKey")?.GetValue(config) as string) ?? "").Trim();
+                result.MdblistApiKey = ((config.GetType().GetProperty("MdblistApiKey")?.GetValue(config) as string) ?? "").Trim();
                 result.On = Flag("ShowMissingTitles") && Flag("MissingExportToFile") && Flag("MissingExportJson");
             }
             catch (Exception swallowed) { Log.Debug("Could not read Home Screen Companion's settings: " + swallowed.Message); }
