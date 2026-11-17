@@ -128,7 +128,12 @@
         .ac-banner.error { border-color: rgba(229,115,115,0.45); color: var(--ac-danger-text); background: rgba(229,115,115,0.08); }
 
         .ac-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
-        .ac-toolbar .ac-input[type=search] { flex: 1 1 200px; }
+        .ac-toolbar .ac-input[type=search] { flex: 1 1 140px; min-width: 140px; }
+        /* The Missing tab's filters: one block beside the search, or as a whole on the next line; each select
+           at most as wide as it needs to show the choice, and narrower when the block has to fit */
+        .ac-filters { display: flex; gap: 8px; align-items: center; flex: 0 1 auto; min-width: 0; }
+        .ac-filters .ac-select { flex: 0 1 auto; width: auto; min-width: 90px; max-width: 160px; }
+        .ac-filters .ac-btn { flex: 0 0 auto; }
         .ac-bulk { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border: 1px solid var(--ac-hairline); border-radius: 8px; background: var(--ac-tint-1); margin-bottom: 10px; flex-wrap: wrap; }
         .ac-bulk .ac-count { font-size: 0.88em; margin-right: auto; color: var(--theme-text-secondary); }
 
@@ -414,6 +419,7 @@
         #ArrCompanionConfigPage .plugin-footer .simple-link:hover { color: var(--theme-text-primary) !important; opacity: 1; }
 
         @media (max-width: 640px) {
+            .ac-filters { flex-wrap: wrap; }
             .ac-item { flex-wrap: wrap; }
             .ac-item-actions { width: 100%; justify-content: flex-start; padding-left: 36px; }
         }
@@ -446,6 +452,7 @@
                 <div id="acMissingBanner"></div>
                 <div class="ac-toolbar">
                     <input type="search" class="ac-input" id="acSearch" placeholder="Search titles" />
+                    <div class="ac-filters">
                     <select class="ac-select" id="acFilterList"><option value="">All lists</option></select>
                     <select class="ac-select" id="acFilterLang" style="display:none;"><option value="">Any language</option></select>
                     <select class="ac-select" id="acFilterMatch" style="display:none;"><option value="">Any match</option></select>
@@ -465,6 +472,7 @@
                         <option value="year">Newest first</option>
                     </select>
                     <button type="button" class="ac-btn ghost" id="acRefresh" title="Read the list again"><i class="md-icon">refresh</i></button>
+                    </div>
                 </div>
                 <div class="ac-bar">
                     <span id="acTypeChips" class="ac-row"></span>
