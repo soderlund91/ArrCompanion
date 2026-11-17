@@ -27,6 +27,7 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         showInArr: false,  // also the titles Sonarr / Radarr already have
         hiddenView: false, // Show hidden: only the hidden titles
         view: 'list',      // 'list' | 'posters'
+        match: '',         // Match filter: '' any | '100' | '90' … '30' at least | 'u30' under 30
         shown: [],         // the rows the filters let through, in their order (also the ones not drawn yet)
         rendered: 0,       // how many of them are drawn
         rowSigs: {},       // key -> rowSig of the drawn row
@@ -37,6 +38,8 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
 
     function storedView() { try { return localStorage.getItem('arrCompanionView') || 'list'; } catch (e) { return 'list'; } }
     function storeView(v) { try { localStorage.setItem('arrCompanionView', v); } catch (e) { } }
+    function storedMatch() { try { return localStorage.getItem('arrCompanionMatch') || ''; } catch (e) { return ''; } }
+    function storeMatch(v) { try { localStorage.setItem('arrCompanionMatch', v); } catch (e) { } }
     function storedShowInArr() { try { return localStorage.getItem('arrCompanionShowInArr') === '1'; } catch (e) { return false; } }
     function storeShowInArr(on) { try { localStorage.setItem('arrCompanionShowInArr', on ? '1' : '0'); } catch (e) { } }
 
@@ -268,6 +271,29 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         state.filtersStale = false;
         fillListFilter(view);
         fillLangFilter(view);
+        fillMatchFilter(view);
+    }
+
+    // "Any match", then the bands with how many titles are in each. Titles without a match yet are only under Any match.
+    var MATCH_FILTERS = [['100', 'Match 100%'], ['90', 'Match 90%+'], ['80', 'Match 80%+'], ['70', 'Match 70%+'], ['50', 'Match 50%+'], ['30', 'Match 30%+'], ['u30', 'Match under 30%']];
+    function matchFilterLets(f, m) {
+        if (!f) return true;
+        if (m == null) return false;
+        if (f === 'u30') return m < 30;
+        return m >= int(f);
+    }
+    function fillMatchFilter(view) {
+        var sel = view.querySelector('#acFilterMatch');
+        if (sel === document.activeElement) { state.filtersStale = true; return; }
+        var rows = (state.catalog && state.catalog.Rows) || [];
+        var counts = MATCH_FILTERS.map(function () { return 0; });
+        rows.forEach(function (r) {
+            if (r.Match == null) return;
+            MATCH_FILTERS.forEach(function (f, i) { if (matchFilterLets(f[0], r.Match)) counts[i]++; });
+        });
+        sel.innerHTML = option('', 'Any match', !state.match)
+            + MATCH_FILTERS.map(function (f, i) { return option(f[0], f[1] + ' · ' + counts[i], f[0] === state.match); }).join('');
+        sel.style.display = state.catalog && state.catalog.HasMatch ? '' : 'none';
     }
 
     // The languages the page knows a name for: the titles', and any a rule names.
@@ -347,11 +373,13 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         var top = int(view.querySelector('#acFilterTop').value);
         var lang = view.querySelector('#acFilterLang').value;
         var sort = view.querySelector('#acSort').value;
+        var match = state.catalog && state.catalog.HasMatch ? state.match : '';
 
         var out = rows.filter(function (r) {
             if (q && (r.Title || '').toLowerCase().indexOf(q) < 0 && (r.Imdb || '').toLowerCase().indexOf(q) < 0) return false;
             if (type && r.Type !== type) return false;
             if (lang && !langFilterLets(lang, r.Language)) return false;
+            if (match && !matchFilterLets(match, r.Match)) return false;
             if (state.hiddenView ? r.Status !== 'ignored' : !isOpen(r) && !((state.showInArr || withInArr) && r.Status === 'inArr')) return false;
             var places = (r.Places || []).filter(function (p) { return !list || p.List === list; });
             if (list && !places.length) return false;
@@ -1232,6 +1260,11 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
         ['#acFilterList', '#acFilterLang', '#acFilterTop', '#acSort'].forEach(function (sel) {
             view.querySelector(sel).addEventListener('change', function () { renderMissing(view); });
         });
+        view.querySelector('#acFilterMatch').addEventListener('change', function (e) {
+            state.match = e.target.value;
+            storeMatch(state.match);
+            renderMissing(view);
+        });
         // Typing: drawn once the typing pauses.
         var searchTimer = null;
         view.querySelector('#acSearch').addEventListener('input', function () {
@@ -1447,6 +1480,8 @@ define(['emby-input', 'emby-button', 'emby-select', 'emby-checkbox'], function (
             loadFooter(view);
             state.view = storedView() === 'posters' ? 'posters' : 'list';
             state.showInArr = storedShowInArr();
+            state.match = storedMatch();
+            if (state.match && !MATCH_FILTERS.some(function (f) { return f[0] === state.match; })) state.match = '';
             if (!view.dataset.acInit) {
                 view.dataset.acInit = '1';
                 bind(view);

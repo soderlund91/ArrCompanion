@@ -448,6 +448,7 @@
                     <input type="search" class="ac-input" id="acSearch" placeholder="Search titles" />
                     <select class="ac-select" id="acFilterList"><option value="">All lists</option></select>
                     <select class="ac-select" id="acFilterLang" style="display:none;"><option value="">Any language</option></select>
+                    <select class="ac-select" id="acFilterMatch" style="display:none;"><option value="">Any match</option></select>
                     <select class="ac-select" id="acFilterTop" title="Only titles this high on the list">
                         <option value="0">Any place</option>
                         <option value="1">Place 1</option>
@@ -621,7 +622,7 @@
                     <p><em>+ Radarr</em> / <em>+ Sonarr</em> adds a title; <em>✓ Radarr</em> / <em>✓ Sonarr</em> means it is there already (point at it for monitored, downloaded or episodes). <em>In Sonarr / Radarr</em> also shows the titles Sonarr or Radarr has but the library does not have yet; the browser remembers it.</p>
                     <p>Click rows to select them, then <em>Add selected</em> or <em>Hide</em>. Hidden titles are under <em>Show hidden</em>; rules leave them alone. The Add dialog picks the root folder, quality profile, monitoring and search; it starts on the root folder last added to on that server, else the one under Settings.</p>
                     <p>Each title shows its original language ("Chinese", "Korean"), from TMDb with the poster; point at it for its countries. It is green in one of your languages (Settings › <em>Your languages</em>, English unless changed), orange in any other, grey when it is not known. Filter by language with <em>Any language</em>: one language, <em>Your languages</em> or <em>Other languages</em>.</p>
-                    <p><em>Match 82%</em> is how well a title fits what everyone on this server watched in the last 180 days (Emby's played marks of all users, recent plays counting more): its genres, original language, country and main cast and director against those of the watched movies and shows. Point at it for the reason; sort with <em>Best match</em>. It shows once the server has watch history. Its colour: 70% and up green, 50–69% teal, 30–49% amber, below 30% red.</p>
+                    <p><em>Match 82%</em> is how well a title fits what everyone on this server watched in the last 180 days (Emby's played marks of all users, recent plays counting more): its genres, original language, country and main cast and director against those of the watched movies and shows. Point at it for the reason; sort with <em>Best match</em>, or filter with <em>Any match</em>: exactly 100%, 90% and up down to 30% and up, or under 30% (titles without a match yet only show under <em>Any match</em>). It shows once the server has watch history. Its colour: 70% and up green, 50–69% teal, 30–49% amber, below 30% red.</p>
                     <p>The tab opens at once with what Sonarr and Radarr held the last time they were read, reads them again meanwhile and updates the rows when they answer. Languages and match scores are looked up in the background the same way, and kept.</p>
                 </div>
 
